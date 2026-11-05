@@ -19,7 +19,7 @@ function Button({
 
   return (
     <button
-      className={`rounded-lg px-5 py-2.5 font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#18B6A4] disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${className}`}
+      className={`rounded-lg px-5 py-2.5 font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0B766E] disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]} ${className}`}
       {...props}
     >
       {children}

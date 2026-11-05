@@ -22,7 +22,7 @@ function Input({ label, error, className = '', id, ...props }: InputProps) {
         id={inputId}
         aria-invalid={!!error}
         aria-describedby={error ? `${inputId}-error` : undefined}
-        className={`rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-[#18B6A4] focus-visible:ring-offset-2 ${className}`}
+        className={`rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-[#0B766E] focus-visible:ring-offset-2 ${className}`}
         {...props}
       />
 
