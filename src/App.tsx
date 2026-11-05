@@ -11,10 +11,12 @@ import Room from './pages/Room'
 import RoomForm from './pages/RoomForm'
 import Help from './pages/Help'
 import NotFound from './pages/NotFound'
+import PageTitle from './components/PageTitle'
 
 function App() {
   return (
     <BrowserRouter>
+      <PageTitle />
       <Routes>
         <Route element={<MainLayout />}>
           <Route path="/" element={<Home />} />
