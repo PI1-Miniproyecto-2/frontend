@@ -15,7 +15,7 @@ import Room from './pages/Room'
 import RoomForm from './pages/RoomForm'
 import Help from './pages/Help'
 import NotFound from './pages/NotFound'
-import PageTitle from './components/PageTitle'
+import PageTitle from './Components/PageTitle'
 
 function App() {
   return (

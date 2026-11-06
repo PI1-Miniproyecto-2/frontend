@@ -9,7 +9,7 @@ const links = [
   { to: '/login', label: 'Iniciar sesión', end: true },
 ]
 
-function Navbar() {
+export default function Navbar() {
   return (
     <nav aria-label="Navegación principal">
       <ul className="flex flex-wrap items-center gap-2 md:gap-5">
@@ -34,5 +34,3 @@ function Navbar() {
     </nav>
   )
 }
-
-export default Navbar
