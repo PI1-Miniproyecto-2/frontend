@@ -1,20 +1,20 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
 // Layouts
-import MainLayout from './Layouts/MainLayout' // Tu layout público original (Header + Navbar + Footer)
-import AppLayout from './Layouts/AppLayout'   // El layout privado (Sidebar lateral estilo Figma)
+import MainLayout from './layouts/MainLayout' // Tu layout público original (Header + Navbar + Footer)
+import AppLayout from './layouts/AppLayout'   // El layout privado (Sidebar lateral estilo Figma)
 
 // Páginas
-import Home from './Pages/Home'
-import Login from './Pages/Login'
-import Register from './Pages/Register'
-import Dashboard from './Pages/Dashboard'
-import Profile from './Pages/Profile'
-import Rooms from './Pages/Rooms'
-import Room from './Pages/Room'
-import RoomForm from './Pages/RoomForm'
-import Help from './Pages/Help'
-import NotFound from './Pages/NotFound'
+import Home from './pages/Home'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import Dashboard from './pages/Dashboard'
+import Profile from './pages/Profile'
+import Rooms from './pages/Rooms'
+import Room from './pages/Room'
+import RoomForm from './pages/RoomForm'
+import Help from './pages/Help'
+import NotFound from './pages/NotFound'
 import PageTitle from './components/PageTitle'
 
 function App() {
