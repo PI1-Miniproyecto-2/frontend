@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { verificarBackend } from "../services/api";
+import { verificarBackend } from "../services/ApiTemp";
 
 export default function ApiStatusCheck() {
   const [estado, setEstado] = useState("Verificando...");
@@ -7,11 +7,11 @@ export default function ApiStatusCheck() {
 
   useEffect(() => {
     verificarBackend()
-      .then((data) => {
+     .then((data: unknown) => {
         setEstado("Backend conectado");
         setRespuesta(JSON.stringify(data, null, 2));
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         setEstado("Backend desconectado");
         console.error(error);
       });
