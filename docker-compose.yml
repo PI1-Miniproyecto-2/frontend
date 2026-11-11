@@ -1,0 +1,25 @@
+
+services:
+  backend:
+    build:
+      context: ../Backend1
+      dockerfile: Dockerfile
+    container_name: aulapro-backend
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      FIREBASE_PROJECT_ID: miniproyecto-2-c0d28
+      CORS_ORIGIN: http://localhost:8080,http://localhost:5173
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aulapro-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

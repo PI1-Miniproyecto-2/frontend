@@ -1,13 +1,12 @@
+
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
 // Layouts
 import MainLayout from './layouts/MainLayout' // Tu layout público original (Header + Navbar + Footer)
 import AppLayout from './layouts/AppLayout'   // El layout privado (Sidebar lateral estilo Figma)
 
-// Páginas
 import Home from './pages/Home'
-import Login from './pages/Login'
-import Register from './pages/Register'
+import AuthPage from './pages/AuthPage'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import Rooms from './pages/Rooms'
@@ -20,18 +19,20 @@ import PageTitle from './components/PageTitle'
 function App() {
   return (
     <BrowserRouter>
-      {/* Mantiene el título dinámico por accesibilidad WCAG */}
       <PageTitle />
-      
+
       <Routes>
-        {/* RUTAS PÚBLICAS: Usan tu MainLayout (Header superior + Navbar horizontal + Footer) */}
+        {/* Autenticación: un solo componente para ambas pantallas */}
+        <Route path="/" element={<Navigate to="/register" replace />} />
+        <Route path="/register" element={<AuthPage />} />
+        <Route path="/login" element={<AuthPage />} />
+
+        {/* Página pública */}
         <Route element={<MainLayout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/inicio" element={<Home />} />
         </Route>
 
-        {/* RUTAS PRIVADAS: Usan AppLayout (Sidebar verde lateral estilo Figma) */}
+        {/* Páginas privadas */}
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/profile" element={<Profile />} />
@@ -42,7 +43,6 @@ function App() {
           <Route path="/help" element={<Help />} />
         </Route>
 
-        {/* RUTA 404 Y REDIRECCIONES */}
         <Route path="/404" element={<NotFound />} />
         <Route path="*" element={<Navigate to="/404" replace />} />
       </Routes>
