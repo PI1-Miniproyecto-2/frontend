@@ -1,8 +1,9 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
-import MainLayout from './layouts/MainLayout'
-import AppLayout from './layouts/AppLayout'
+// Layouts
+import MainLayout from './layouts/MainLayout' // Tu layout público original (Header + Navbar + Footer)
+import AppLayout from './layouts/AppLayout'   // El layout privado (Sidebar lateral estilo Figma)
 
 import Home from './pages/Home'
 import AuthPage from './pages/AuthPage'
