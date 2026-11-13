@@ -1,6 +1,5 @@
 
-
-import { initializeApp } from 'firebase/app'
+import { initializeApp, getApps, getApp } from 'firebase/app'
 import {
   getAuth,
   GoogleAuthProvider,
@@ -17,11 +16,20 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-const app = initializeApp(firebaseConfig)
+// Inicializar Firebase una sola vez
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig)
 
+// Servicio de autenticación
 export const auth = getAuth(app)
 
+// Proveedor de autenticación con Google
 export const googleProvider = new GoogleAuthProvider()
 
-export const persistirSesion = () =>
-  setPersistence(auth, browserLocalPersistence)
+googleProvider.setCustomParameters({
+  prompt: 'select_account',
+})
+
+// Mantener la sesión aunque se cierre el navegador
+export const persistirSesion = () => {
+  return setPersistence(auth, browserLocalPersistence)
+}
