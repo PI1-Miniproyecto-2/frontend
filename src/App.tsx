@@ -15,6 +15,7 @@ import RoomForm from './pages/RoomForm'
 import Help from './pages/Help'
 import NotFound from './pages/NotFound'
 import PageTitle from './components/PageTitle'
+import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
   return (
@@ -32,16 +33,18 @@ function App() {
           <Route path="/inicio" element={<Home />} />
         </Route>
 
-        {/* Páginas privadas */}
-        <Route element={<AppLayout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/rooms" element={<Rooms />} />
-          <Route path="/rooms/create" element={<RoomForm />} />
-          <Route path="/rooms/edit/:id" element={<RoomForm />} />
-          <Route path="/room/:id" element={<Room />} />
-          <Route path="/help" element={<Help />} />
-        </Route>
+{/* Páginas privadas protegidas */}
+<Route element={<ProtectedRoute />}>
+  <Route element={<AppLayout />}>
+    <Route path="/dashboard" element={<Dashboard />} />
+    <Route path="/profile" element={<Profile />} />
+    <Route path="/rooms" element={<Rooms />} />
+    <Route path="/rooms/create" element={<RoomForm />} />
+    <Route path="/rooms/edit/:id" element={<RoomForm />} />
+    <Route path="/room/:id" element={<Room />} />
+    <Route path="/help" element={<Help />} />
+  </Route>
+</Route>
 
         <Route path="/404" element={<NotFound />} />
         <Route path="*" element={<Navigate to="/404" replace />} />
