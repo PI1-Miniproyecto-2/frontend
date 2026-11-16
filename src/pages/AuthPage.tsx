@@ -1,6 +1,19 @@
 
 import { useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import {
+  registrarConCorreo,
+  iniciarSesionConCorreo,
+  mensajeErrorFirebase,
+} from '../services/AuthService'
+
+import {
+  crearPerfil,
+  consultarPerfil,
+  type DatosPerfil,
+} from '../services/ProfileService'
+
+import { useAuth } from '../context/AuthContext'
 import {
   BookOpen,
   ArrowLeft,
@@ -29,6 +42,8 @@ type FormData = {
 }
 
 function AuthPage() {
+    const navigate = useNavigate()
+  const { refrescarPerfil } = useAuth()
   // false = Registro | true = Inicio de sesión
   const [isLogin, setIsLogin] = useState(false)
 
@@ -127,30 +142,126 @@ function AuthPage() {
     return Object.keys(newErrors).length === 0
   }
 
+
+  const mensajeErrorAPI = (error: unknown): string => {
+    const apiError = error as Error & { status?: number }
+
+    if (apiError.status === 409) {
+      return 'El nombre de usuario está ocupado o el perfil ya existe.'
+    }
+
+    if (apiError.status === 400) {
+      return 'Los datos del perfil no son válidos.'
+    }
+
+    if (apiError.status === 401) {
+      return 'La API no autorizó tu sesión.'
+    }
+
+    return apiError.message || 'No fue posible guardar el perfil.'
+  }
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+
+    if (loading) return
+
     setMessage('')
 
     if (!validate()) return
 
     setLoading(true)
 
-    if (isLogin) {
-      // Aquí conectaremos posteriormente el endpoint real de autenticación.
-      // Mientras tanto, se muestra el estado de carga y el error de credenciales.
-      await new Promise((resolve) => setTimeout(resolve, 700))
+    try {
+if (isLogin) {
+  // 1. Autenticar al usuario en Firebase.
+  await iniciarSesionConCorreo(form.email, form.password)
 
-      setLoading(false)
-      setMessage('Correo o contraseña incorrectos')
-      return
-    }
+  // 2. Consultar el perfil real mediante la API.
+  const perfilActualizado = await refrescarPerfil()
 
-    // Registro visual listo para conectar con la API.
-    setLoading(false)
-    setMessage(
-      '¡Formulario validado correctamente! El registro está listo para conectarse con el servidor.'
-    )
+  // 3. Permitir el acceso solo si el perfil está completo.
+  if (
+    perfilActualizado?.profileCompleted &&
+    perfilActualizado.username?.trim()
+  ) {
+    navigate('/dashboard', { replace: true })
+  } else {
+    navigate('/elegir-usuario', { replace: true })
   }
+
+  return
+}
+
+      // Crear cuenta en Firebase.
+      await registrarConCorreo(form.email, form.password)
+
+      // Preparar datos para la API.
+      // No enviar correo ni contraseña.
+      const datosPerfil: DatosPerfil = {
+        firstName: form.nombres.trim(),
+        lastName: form.apellidos.trim(),
+        username: form.username.trim(),
+        avatarId: 'avatar_book',
+      }
+
+      let perfilGuardado
+
+      // Crear perfil en el backend.
+      try {
+        perfilGuardado = await crearPerfil(datosPerfil)
+      } catch (error) {
+        const status = (error as Error & { status?: number }).status
+
+        // Verificar si el perfil se guardó antes
+        // de intentar otra creación.
+        if (status === 409 || status === 500 || status === 503) {
+          try {
+            perfilGuardado = await consultarPerfil()
+          } catch {
+            // Mantener el error original.
+          }
+
+          if (!perfilGuardado) {
+            throw error
+          }
+        } else {
+          throw error
+        }
+      }
+
+      // Actualizar el perfil del contexto.
+      const perfilActualizado = await refrescarPerfil()
+
+      if (
+        perfilActualizado?.profileCompleted &&
+        perfilActualizado.username?.trim()
+      ) {
+        navigate('/dashboard', { replace: true })
+      } else {
+        navigate('/elegir-usuario', { replace: true })
+      }
+    } catch (error) {
+      const codigo =
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error
+          ? String(error.code)
+          : ''
+
+      if (codigo.startsWith('auth/')) {
+        setMessage(mensajeErrorFirebase(error))
+      } else {
+        setMessage(
+          `No se pudo completar el registro: ${mensajeErrorAPI(error)}`
+        )
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+
 
   const handleGoogle = () => {
     setMessage(

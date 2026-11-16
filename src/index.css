@@ -42,7 +42,7 @@ a {
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   overflow: hidden;
   min-height: 100vh;
   padding: 48px 8%;
@@ -64,7 +64,7 @@ a {
 .brand-message {
   position: relative;
   z-index: 1;
-  margin-top: -30px;
+  margin-top: clamp(65px, 12vh, 120px);
 }
 
 .brand-eyebrow {
