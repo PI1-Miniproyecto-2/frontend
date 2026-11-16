@@ -23,7 +23,7 @@ interface AuthContextType {
   perfil: Perfil | null
   cargando: boolean
   errorPerfil: string | null
-  refrescarPerfil: () => Promise<void>
+  refrescarPerfil: () => Promise<Perfil | null>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -34,24 +34,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [cargando, setCargando] = useState(true)
   const [errorPerfil, setErrorPerfil] = useState<string | null>(null)
 
-  const refrescarPerfil = async () => {
-    try {
-      const resultado = await consultarPerfil()
-      setPerfil(resultado)
+const refrescarPerfil = async (): Promise<Perfil | null> => {
+  try {
+    const resultado = await consultarPerfil()
+    setPerfil(resultado)
+    setErrorPerfil(null)
+    return resultado
+  } catch (error) {
+    const status = (error as Error & { status?: number }).status
+
+    if (status === 404) {
+      setPerfil(null)
       setErrorPerfil(null)
-    } catch (error) {
-      const status = (error as Error & { status?: number }).status
-
-      if (status === 404) {
-        setPerfil(null)
-        setErrorPerfil(null)
-        return
-      }
-
-      setErrorPerfil('No fue posible verificar tu perfil.')
-      throw error
+      return null
     }
+
+    setErrorPerfil('No fue posible verificar tu perfil.')
+    throw error
   }
+}
+
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
