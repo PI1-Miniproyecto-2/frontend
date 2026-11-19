@@ -1,5 +1,6 @@
 
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Plus,
   Link as LinkIcon,
@@ -9,8 +10,8 @@ import {
 } from 'lucide-react'
 
 function Dashboard() {
+  const navigate = useNavigate()
   const [roomCode, setRoomCode] = useState('')
-
   const handleJoinRoom = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
@@ -54,13 +55,16 @@ function Dashboard() {
           </div>
 
           <div className="flex flex-wrap gap-3 mt-6">
-            <button
-              type="button"
-              className="flex items-center gap-2 bg-[#047857] hover:bg-[#065F46] text-white font-medium px-5 py-2.5 rounded-xl transition-colors text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A3C3E]"
-            >
-              <Plus className="w-4 h-4" aria-hidden="true" />
-              Crear sala
-            </button>
+
+<button
+  type="button"
+  onClick={() => navigate('/rooms/create')}
+  className="flex items-center gap-2 bg-[#047857] hover:bg-[#065F46] text-white font-medium px-5 py-2.5 rounded-xl transition-colors text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A3C3E]"
+>
+  <Plus className="w-4 h-4" aria-hidden="true" />
+  Crear sala
+</button>
+
 
             <button
               type="button"
