@@ -324,15 +324,49 @@ if (isLogin) {
             Volver al inicio
           </Link>
 
-          <h2>
-            {isLogin ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}
-          </h2>
+<h2>
+  {isLogin ? 'Bienvenido de nuevo' : 'Crea tu cuenta'}
+</h2>
 
-          <p className="register-subtitle">
-            {isLogin
-              ? 'Tu próxima sesión de estudio está a un clic.'
-              : 'Organiza tu próximo encuentro de estudio.'}
-          </p>
+<p className="register-subtitle">
+  {isLogin
+    ? 'Tu próxima sesión de estudio está a un clic.'
+    : 'Organiza tu próximo encuentro de estudio.'}
+</p>
+
+{/* BOTONES PARA CAMBIAR ENTRE REGISTRO E INICIO DE SESIÓN */}
+<div
+  role="group"
+  aria-label="Seleccionar tipo de acceso"
+  className="mt-5 mb-6 grid grid-cols-2 gap-3"
+>
+  <button
+    type="button"
+    onClick={() => changeMode(false)}
+    aria-pressed={!isLogin}
+    className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#087F77] ${
+      !isLogin
+        ? 'border-[#2FC79B] bg-[#2FC79B] text-[#073B43]'
+        : 'border-[#DCE9E8] bg-white text-[#073B43] hover:bg-[#F1F7F6]'
+    }`}
+  >
+    Crear cuenta
+  </button>
+
+  <button
+    type="button"
+    onClick={() => changeMode(true)}
+    aria-pressed={isLogin}
+    className={`rounded-xl border px-4 py-3 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#087F77] ${
+      isLogin
+        ? 'border-[#2FC79B] bg-[#2FC79B] text-[#073B43]'
+        : 'border-[#DCE9E8] bg-white text-[#073B43] hover:bg-[#F1F7F6]'
+    }`}
+  >
+    Iniciar sesión
+  </button>
+</div>
+
 
           {/* MENSAJE DE ERROR O INFORMACIÓN */}
           {message && (
