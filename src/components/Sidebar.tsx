@@ -1,8 +1,20 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, BookOpen, User, HelpCircle, LogOut } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+
 
 function Sidebar() {
   const navigate = useNavigate()
+  const { perfil, user } = useAuth()
+
+  const nombre = perfil?.firstName?.trim() || user?.displayName?.split(' ')[0] || 'Estudiante'
+  const apellido = perfil?.lastName?.trim() || ''
+  const nombreCompleto = [nombre, apellido].filter(Boolean).join(' ')
+
+  const username = perfil?.username || user?.email?.split('@')[0] || 'usuario'
+
+  const iniciales = `${nombre.charAt(0)}${apellido.charAt(0) || ''}`.toUpperCase()
+
 
   const handleLogout = () => {
     navigate('/login')
@@ -67,24 +79,39 @@ function Sidebar() {
         </nav>
       </div>
 
-      <div className="bg-[#0E4B4E] rounded-2xl p-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-[#10B981] text-white flex items-center justify-center font-bold text-sm">
-            EC
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-white leading-tight">Emilio Castro</p>
-            <p className="text-xs text-gray-300">@emilio.c</p>
-          </div>
-        </div>
-        <button
-          onClick={handleLogout}
-          title="Cerrar sesión"
-          className="text-gray-300 hover:text-white p-1.5 hover:bg-[#0A3C3E] rounded-lg transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
-      </div>
+ 
+<div className="bg-[#0E4B4E] rounded-2xl p-3 flex items-center justify-between">
+  <div className="flex items-center gap-3 min-w-0">
+    <div
+      className="w-9 h-9 shrink-0 rounded-full bg-[#10B981] text-white flex items-center justify-center font-bold text-sm"
+      aria-label={`Usuario ${nombreCompleto}`}
+      role="img"
+    >
+      {iniciales}
+    </div>
+
+    <div className="min-w-0">
+      <p className="text-sm font-semibold text-white leading-tight truncate">
+        {nombreCompleto}
+      </p>
+
+      <p className="text-xs text-gray-300 truncate">
+        @{username}
+      </p>
+    </div>
+  </div>
+
+  <button
+    type="button"
+    onClick={handleLogout}
+    title="Cerrar sesión"
+    aria-label="Cerrar sesión"
+    className="text-gray-300 hover:text-white p-1.5 hover:bg-[#0A3C3E] rounded-lg transition-colors shrink-0"
+  >
+    <LogOut className="w-4 h-4" />
+  </button>
+</div>
+
     </aside>
   )
 }

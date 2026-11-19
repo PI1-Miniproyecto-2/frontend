@@ -1,6 +1,7 @@
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 import {
   Plus,
   Link as LinkIcon,
@@ -9,9 +10,18 @@ import {
   BookOpen,
 } from 'lucide-react'
 
+
 function Dashboard() {
   const navigate = useNavigate()
+  const { perfil, user } = useAuth()
   const [roomCode, setRoomCode] = useState('')
+
+  const nombre = perfil?.firstName?.trim() || user?.displayName?.split(' ')[0] || 'Estudiante'
+  const apellido = perfil?.lastName?.trim() || ''
+  const nombreCompleto = [nombre, apellido].filter(Boolean).join(' ')
+
+  const iniciales = `${nombre.charAt(0)}${apellido.charAt(0) || ''}`.toUpperCase()
+
   const handleJoinRoom = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
@@ -28,13 +38,13 @@ function Dashboard() {
         </span>
 
         <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-900 flex items-center justify-center font-bold text-sm"
-            aria-label="Usuario Emilio"
-            role="img"
-          >
-            CE
-          </div>
+<div
+  className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-900 flex items-center justify-center font-bold text-sm"
+  aria-label={`Usuario ${nombreCompleto}`}
+  role="img"
+>
+  {iniciales}
+</div>
         </div>
       </div>
 
@@ -45,9 +55,9 @@ function Dashboard() {
               MARTES, 18 DE JUNIO
             </p>
 
-            <h2 className="text-3xl font-bold mb-1">
-              ¡Hola, Emilio!
-            </h2>
+        <h2 className="text-3xl font-bold mb-1">
+          ¡Hola, {nombre}!
+        </h2>
 
             <p className="text-emerald-100 text-sm">
               ¿Qué vamos a estudiar hoy?
