@@ -9,18 +9,15 @@ export type PrivacidadSala = 'private' | 'public'
 
 export interface CrearSalaDatos {
   name: string
-  description: string
-  privacy: PrivacidadSala
 }
 
 export interface Sala {
-  id: string
+  roomId: string
   name: string
-  description: string
-  privacy: PrivacidadSala
-  ownerId: string
+  ownerUid: string
+  participantUids: string[]
   createdAt: string | null
-  updatedAt: string | null
+  status?: string
 }
 
 async function peticionSalas<T>(

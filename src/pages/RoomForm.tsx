@@ -40,14 +40,12 @@ function RoomForm() {
 
     setGuardando(true)
 
-    try {
-      const sala = await crearSala({
-        name: nombre.trim(),
-        description: descripcion.trim(),
-        privacy: privacidad,
-      })
+      try {
+const sala = await crearSala({
+  name: nombre.trim(),
+})
 
-      setSalaCreada(sala)
+setSalaCreada(sala)
     } catch (err) {
       setError(
         err instanceof Error
@@ -63,7 +61,7 @@ function RoomForm() {
     if (!salaCreada) return
 
     try {
-      await navigator.clipboard.writeText(salaCreada.id)
+      await navigator.clipboard.writeText(salaCreada.roomId)
       setCopiado(true)
     } catch {
       setError('No fue posible copiar el código.')
@@ -93,7 +91,7 @@ function RoomForm() {
 
           <div className="flex items-center justify-center gap-3">
             <span className="break-all font-mono text-lg font-bold text-[#176B71]">
-              {salaCreada.id}
+              {salaCreada.roomId}
             </span>
 
             <button
@@ -128,7 +126,9 @@ function RoomForm() {
 
           <button
             type="button"
-            onClick={() => navigate(`/room/${encodeURIComponent(salaCreada.id)}`)}
+            onClick={() =>
+  navigate(`/room/${encodeURIComponent(salaCreada.roomId)}`)
+}
             className="flex-1 rounded-xl bg-[#70DCCB] px-5 py-3 text-sm font-semibold text-[#073B43] hover:bg-[#50CDBA]"
           >
             Ingresar ahora
