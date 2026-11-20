@@ -1,9 +1,11 @@
 
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+
 import {
   registrarConCorreo,
   iniciarSesionConCorreo,
+  iniciarSesionConGoogle,
   mensajeErrorFirebase,
 } from '../services/AuthService'
 
@@ -263,11 +265,55 @@ if (isLogin) {
 
 
 
-  const handleGoogle = () => {
-    setMessage(
-      'La autenticación con Google estará disponible cuando conectemos Firebase Authentication.'
-    )
+
+const handleGoogle = async () => {
+  if (loading) return
+
+  setLoading(true)
+  setMessage('')
+  setErrors({})
+
+  try {
+    // 1. Abrir Google y autenticar con Firebase.
+    await iniciarSesionConGoogle()
+
+    // 2. Consultar el perfil a través del backend.
+    const perfilActualizado = await refrescarPerfil()
+
+    // 3. Si ya tiene un perfil completo, entrar al Dashboard.
+    if (
+      perfilActualizado?.profileCompleted &&
+      perfilActualizado.username?.trim()
+    ) {
+      navigate('/dashboard', { replace: true })
+      return
+    }
+
+    // 4. Si es un usuario nuevo, completar su perfil.
+    navigate('/elegir-usuario', { replace: true })
+
+  } catch (error) {
+    console.error('Error de autenticación con Google:', error)
+
+    const codigo =
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error
+        ? String(error.code)
+        : ''
+
+    if (codigo.startsWith('auth/')) {
+      setMessage(mensajeErrorFirebase(error))
+    } else {
+      setMessage(
+        `No fue posible completar el acceso con Google: ${mensajeErrorAPI(error)}`
+      )
+    }
+  } finally {
+    setLoading(false)
   }
+}
+
 
   const handleForgotPassword = () => {
     setMessage(
@@ -383,14 +429,23 @@ if (isLogin) {
           )}
 
           {/* GOOGLE */}
-          <button
-            type="button"
-            className="google-button"
-            onClick={handleGoogle}
-          >
-            <span className="google-letter">G</span>
-            {isLogin ? 'Continuar con Google' : 'Registrarse con Google'}
-          </button>
+
+
+        <button
+          type="button"
+          className="google-button"
+          onClick={handleGoogle}
+          disabled={loading}
+        >
+          <span className="google-letter">G</span>
+          {loading
+            ? 'Conectando con Google...'
+            : isLogin
+              ? 'Continuar con Google'
+              : 'Registrarse con Google'}
+        </button>
+
+
 
           <div className="register-divider">
             <span>
