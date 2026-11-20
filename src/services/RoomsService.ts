@@ -53,6 +53,14 @@ export async function crearSala(datos: CrearSalaDatos): Promise<Sala> {
   return peticionSalas<Sala>('POST', datos)
 }
 
+
 export async function obtenerMisSalas(): Promise<Sala[]> {
-  return peticionSalas<Sala[]>('GET')
+  const resultado = await peticionSalas<{ rooms: Sala[] }>('GET')
+
+  if (!Array.isArray(resultado.rooms)) {
+    throw new Error('La respuesta de las salas no es válida.')
+  }
+
+  return resultado.rooms
 }
+
