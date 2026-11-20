@@ -1,9 +1,11 @@
-
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { actualizarPerfil } from '../services/ProfileService'
+import { actualizarPerfil, eliminarPerfil } from '../services/ProfileService'
+import { cerrarSesionFirebase } from '../services/AuthService'
 
 export default function Profile() {
+  const navigate = useNavigate()
   const {
     user,
     perfil,
@@ -16,6 +18,8 @@ export default function Profile() {
   const [editando, setEditando] = useState(false)
   const [guardando, setGuardando] = useState(false)
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false)
+  const [eliminando, setEliminando] = useState(false)
+  const [errorEliminacion, setErrorEliminacion] = useState<string | null>(null)
   const botonEliminarRef = useRef<HTMLButtonElement>(null)
   const botonCancelarRef = useRef<HTMLButtonElement>(null)
 
@@ -23,7 +27,9 @@ export default function Profile() {
     if (!mostrarConfirmacion) return
     botonCancelarRef.current?.focus()
     const manejarTecla = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMostrarConfirmacion(false)
+      if (event.key === 'Escape' && !eliminando) {
+  setMostrarConfirmacion(false)
+}
       if (event.key === 'Tab') {
         const modal = document.getElementById('modal-eliminar-cuenta')
         const controles = Array.from(modal?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
@@ -47,6 +53,47 @@ export default function Profile() {
   }, [mostrarConfirmacion])
 
   const [nombre, setNombre] = useState('')
+
+
+const confirmarEliminacion = async () => {
+  if (eliminando) return
+
+  setEliminando(true)
+  setErrorEliminacion(null)
+
+  try {
+    console.log('Solicitando eliminación de cuenta al backend...')
+
+    // Solicitar eliminación real al backend.
+    await eliminarPerfil()
+
+    console.log('El backend confirmó la eliminación.')
+
+    // Cerrar la sesión local después de la confirmación.
+    try {
+      await cerrarSesionFirebase()
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error)
+    }
+
+    setMostrarConfirmacion(false)
+    navigate('/', { replace: true })
+
+  } catch (error) {
+    console.error('El backend rechazó la eliminación:', error)
+
+    const respuesta = error as Error & { status?: number }
+
+    setErrorEliminacion(
+      respuesta.message ||
+      'No se pudo eliminar la cuenta. Inténtalo nuevamente.'
+    )
+  } finally {
+    setEliminando(false)
+  }
+}
+
+
   const [apellido, setApellido] = useState('')
   const [username, setUsername] = useState('')
 
@@ -433,19 +480,34 @@ export default function Profile() {
                 className="rounded-xl border border-gray-300 px-5 py-3 font-semibold text-[#073B43] hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#073B43]"
               >
                 Cancelar
+                
               </button>
-              <button
-                type="button"
-                disabled
-                aria-describedby="aviso-eliminacion-pendiente"
-                className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Eliminar cuenta
-              </button>
+
+          <button
+            type="button"
+            onClick={confirmarEliminacion}
+            disabled={eliminando}
+            className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {eliminando ? 'Eliminando cuenta...' : 'Eliminar cuenta'}
+          </button>
+
             </div>
-            <p id="aviso-eliminacion-pendiente" className="mt-4 text-xs text-gray-500">
-              La eliminación definitiva estará disponible cuando se complete la integración con Firebase Authentication.
-            </p>
+
+{errorEliminacion && (
+  <p
+    role="alert"
+    className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+  >
+    {errorEliminacion}
+  </p>
+)}
+
+      <p className="mt-4 text-xs text-gray-500">
+        Por seguridad, es posible que necesites iniciar sesión nuevamente
+        antes de eliminar tu cuenta.
+      </p>
+
           </section>
         </div>
       )}

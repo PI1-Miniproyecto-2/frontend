@@ -57,9 +57,21 @@ export default function ElegirUsuario() {
     setError('')
 
     try {
-      const datos = {
-        username: nombreUsuario,
-      }
+
+const nombreGoogle = user.displayName?.trim() || ''
+
+const partesNombre = nombreGoogle.split(/\s+/).filter(Boolean)
+
+const firstName = partesNombre[0] || 'Estudiante'
+const lastName = partesNombre.slice(1).join(' ') || 'AulaPro'
+
+const datos = {
+  firstName: perfil?.firstName || firstName,
+  lastName: perfil?.lastName || lastName,
+  username: nombreUsuario,
+  avatarId: perfil?.avatarId || ('avatar_book' as const),
+}
+
 
       if (perfil) {
         await actualizarPerfil(datos)
