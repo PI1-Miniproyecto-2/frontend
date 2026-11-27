@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { onIdTokenChanged, type User } from 'firebase/auth'
 import { auth } from '../services/Firebase'
+import { consultarSalaConPlazo, ErrorSala, guardarNombreSala } from '../services/RoomsService'
 import { crearSocketSala, urlRealtime, ESPERA_ACK, ESPERA_SALIDA } from '../services/RealtimeService'
 import {
   crearHistorialSala, historialInicial, incorporarMensajes, ordenarMensajes, TAMANO_PAGINA,
@@ -21,6 +22,8 @@ const sinConfiguracion = {
 const noConfirmado = 'No pudimos confirmar la entrega. Revisa el chat antes de volver a enviar.'
 
 type Acciones = {
+  invalidarSala: (mensaje: string) => void
+  editarNombre: (nombre: string, signal: AbortSignal) => Promise<boolean>
   enviar: (content: string) => Promise<string | null>
   salir: () => Promise<void>
   reintentar: () => void
@@ -75,6 +78,11 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   let saliendo = false
   let unido = false
   let version = 0
+  let revisionNombre = 0
+  let nombreActual: string | undefined
+  let nombreConfirmadoPorRest: string | undefined
+  let consultaNombre: AbortController | undefined
+  let yaIngreso = false
   let presenciaInicial: string[] | null = null
   let tokenHandshake: string | undefined
   let forzarToken = false
@@ -141,8 +149,43 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
     vigente,
   })
 
+  function publicarNombre(nombre: string) {
+    if (nombreActual === nombre) return
+    nombreActual = nombre
+    setNombre(nombre)
+  }
+
+  function reconciliarNombre(nombreEvento?: string) {
+    consultaNombre?.abort()
+    const solicitud = new AbortController()
+    consultaNombre = solicitud
+    const revision = revisionNombre
+    const vigenteConsulta = () => vigente() && !solicitud.signal.aborted && revision === revisionNombre
+
+    void consultarSalaConPlazo(roomId, solicitud.signal)
+      .then(sala => {
+        if (!vigenteConsulta()) return
+        revisionNombre++
+        nombreConfirmadoPorRest = undefined
+        publicarNombre(sala.name)
+      })
+      .catch((error: unknown) => {
+        if (!vigenteConsulta()) return
+        if (error instanceof ErrorSala && [401, 403, 404].includes(error.status ?? 0)) {
+          denegar(error.status === 401 ? erroresRealtime.UNAUTHENTICATED : erroresRealtime.INVALID_ROOM)
+        } else if (nombreEvento) {
+          nombreConfirmadoPorRest = undefined
+          publicarNombre(nombreEvento)
+        }
+      })
+      .finally(() => {
+        if (consultaNombre === solicitud) consultaNombre = undefined
+      })
+  }
+
   function perderPresencia() {
     historial.interrumpir()
+    consultaNombre?.abort()
     version++
     unido = false
     presenciaInicial = null
@@ -157,6 +200,7 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   function cerrar() {
     cerrado = true
     miembros.cerrar()
+    consultaNombre?.abort()
     historial.cerrar()
     clearTimeout(renovacion)
     clearTimeout(esperaHandshake)
@@ -242,6 +286,8 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
     antesDelIngreso.forEach(agregarMensaje)
     antesDelIngreso.clear()
     historial.ingresar()
+    if (yaIngreso) reconciliarNombre()
+    yaIngreso = true
   }
 
   canal.on('connect', async () => {
@@ -318,7 +364,14 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   })
   canal.on('room:updated', payload => {
     if (vigente() && esDeSala(payload, roomId) && typeof payload.name === 'string' && payload.name.trim()) {
-      setNombre(payload.name)
+      revisionNombre++
+      consultaNombre?.abort()
+      if (nombreConfirmadoPorRest !== undefined && payload.name !== nombreConfirmadoPorRest) {
+        reconciliarNombre(payload.name)
+      } else {
+        nombreConfirmadoPorRest = undefined
+        publicarNombre(payload.name)
+      }
     }
   })
   canal.on('room:deleted', payload => {
@@ -361,6 +414,33 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   }
 
   const acciones: Acciones = {
+    invalidarSala(mensaje) {
+      if (vigente()) denegar(mensaje)
+    },
+    async editarNombre(nombre, signal) {
+      if (!vigente()) throw new ErrorSala('autenticacion')
+      const revision = revisionNombre
+      try {
+        const resultado = await guardarNombreSala(roomId, nombre, signal)
+        if (!vigente() || signal.aborted) return false
+        if (revision === revisionNombre) {
+          consultaNombre?.abort()
+          nombreConfirmadoPorRest = resultado.sala.name
+          publicarNombre(resultado.sala.name)
+        } else if (nombreActual !== resultado.sala.name) {
+          // Los eventos y las respuestas REST no incluyen una versión común.
+          reconciliarNombre()
+        }
+        return resultado.confirmado
+      } catch (error) {
+        if (vigente() && !signal.aborted && error instanceof ErrorSala) {
+          if (error.status === 404) denegar(erroresRealtime.INVALID_ROOM)
+          else if (error.status === 401) denegar(erroresRealtime.UNAUTHENTICATED)
+          else if (error.status === 403) reconciliarNombre()
+        }
+        throw error
+      }
+    },
     async enviar(content) {
       const texto = content.trim()
       if (!texto || texto.length > LIMITE_MENSAJE) return erroresRealtime.INVALID_MESSAGE
