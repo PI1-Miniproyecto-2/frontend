@@ -1,0 +1,382 @@
+import { useEffect, useRef, useState } from 'react'
+import { onIdTokenChanged, type User } from 'firebase/auth'
+import { auth } from '../services/Firebase'
+import { crearSocketSala, urlRealtime, ESPERA_ACK, ESPERA_SALIDA } from '../services/RealtimeService'
+import { crearDirectorioSala, directorioVacio, type Directorio } from '../services/RoomDirectory'
+import {
+  codigoRealtime, erroresRealtime, esDeSala, esMensaje, esObjeto, LIMITE_MENSAJE,
+  type CodigoRealtime, type Message,
+} from '../types/realtime'
+
+type EstadoConexion = 'connecting' | 'connected' | 'lost' | 'reconnecting' | 'failed' | 'denied' | 'leaving'
+const estadoInicial = { estado: 'connecting', texto: 'Conectando con la sala…' } as const
+const sinConfiguracion = {
+  estado: 'failed',
+  texto: 'No pudimos conectar con la sala. Falta configurar el servicio en tiempo real.',
+} as const
+const noConfirmado = 'No pudimos confirmar la entrega. Revisa el chat antes de volver a enviar.'
+
+type Acciones = {
+  enviar: (content: string) => Promise<string | null>
+  salir: () => Promise<void>
+  reintentar: () => void
+  reintentarPerfiles: () => void
+}
+
+export function useRoomSocket(roomId: string, user: User) {
+  const [conexion, setConexion] = useState<{ estado: EstadoConexion; texto: string }>(() => urlRealtime ? estadoInicial : sinConfiguracion)
+  const [presencia, setPresencia] = useState<string[] | null>(null)
+  const [mensajes, setMensajes] = useState<Message[]>([])
+  const [directorio, setDirectorio] = useState(directorioVacio)
+  const [aviso, setAviso] = useState('')
+  const [nombre, setNombre] = useState<string>()
+  const [puedeReintentar, setPuedeReintentar] = useState(false)
+  const acciones = useRef<Acciones | null>(null)
+
+  useEffect(() => {
+    if (!urlRealtime || auth.currentUser !== user) return
+    const sesion = iniciarSesionSala(roomId, user, urlRealtime, {
+      setConexion, setPresencia, setMensajes, setDirectorio, setAviso, setNombre, setPuedeReintentar,
+    })
+    acciones.current = sesion.acciones
+    return () => {
+      acciones.current = null
+      sesion.cerrar()
+    }
+  }, [roomId, user])
+
+  return { conexion, presencia, mensajes, directorio, nombre, aviso, puedeReintentar, acciones }
+}
+
+type Actualizaciones = {
+  setConexion: (conexion: { estado: EstadoConexion; texto: string }) => void
+  setPresencia: (presencia: string[] | null) => void
+  setMensajes: (mensajes: Message[]) => void
+  setDirectorio: (directorio: Directorio) => void
+  setAviso: (aviso: string) => void
+  setNombre: (nombre: string | undefined) => void
+  setPuedeReintentar: (disponible: boolean) => void
+}
+
+function iniciarSesionSala(roomId: string, user: User, url: string, {
+  setConexion, setPresencia, setMensajes, setDirectorio, setAviso, setNombre, setPuedeReintentar,
+}: Actualizaciones) {
+  let cerrado = false
+  let saliendo = false
+  let unido = false
+  let version = 0
+  let presenciaInicial: string[] | null = null
+  let tokenHandshake: string | undefined
+  let forzarToken = false
+  let recuperacionAuth = false
+  let renovacion: ReturnType<typeof setTimeout> | undefined
+  let esperaHandshake: ReturnType<typeof setTimeout> | undefined
+  let envioPendiente = false
+  const recibidos = new Map<string, Message>()
+  const antesDelIngreso = new Map<string, Message>()
+  const propiosPendientes = new Map<string, Message>()
+
+  const vigente = () => !cerrado && !saliendo && auth.currentUser === user
+  const canal = crearSocketSala(url, enviar => {
+    const intento = version
+    clearTimeout(esperaHandshake)
+    esperaHandshake = setTimeout(() => {
+      if (vigente() && intento === version) fallo('No pudimos verificar la conexión con la sala.')
+    }, ESPERA_ACK)
+
+    const renovar = forzarToken
+    forzarToken = false
+    void user.getIdTokenResult(renovar).then(resultado => {
+      if (!vigente() || intento !== version) return
+      tokenHandshake = resultado.token
+      clearTimeout(renovacion)
+      renovacion = setTimeout(() => {
+        if (vigente() && canal.connected) reconectar(true)
+      }, Math.max(1_000, Date.parse(resultado.expirationTime) - Date.now() - 45_000))
+      enviar({ token: resultado.token })
+    }).catch((error: unknown) => {
+      if (!vigente() || intento !== version) return
+      if (esObjeto(error) && error.code === 'auth/network-request-failed') {
+        fallo('No pudimos verificar tu conexión. Inténtalo nuevamente.')
+      } else {
+        denegar(erroresRealtime.UNAUTHENTICATED)
+      }
+    })
+  })
+
+  let desuscribirToken: (() => void) | undefined
+  const miembros = crearDirectorioSala(roomId, vigente, setDirectorio, codigo => denegar(erroresRealtime[codigo]))
+
+  function perderPresencia() {
+    version++
+    unido = false
+    presenciaInicial = null
+    antesDelIngreso.clear()
+    clearTimeout(renovacion)
+    clearTimeout(esperaHandshake)
+    setPresencia(null)
+    // Un paquete pendiente de transporte no debe salir después de reconectar.
+    canal.sendBuffer.length = 0
+  }
+
+  function cerrar() {
+    cerrado = true
+    miembros.cerrar()
+    clearTimeout(renovacion)
+    clearTimeout(esperaHandshake)
+    desuscribirToken?.()
+    canal.removeAllListeners()
+    canal.io.removeAllListeners()
+    canal.sendBuffer.length = 0
+    canal.disconnect()
+  }
+
+  function denegar(texto: string) {
+    cerrar()
+    recibidos.clear()
+    antesDelIngreso.clear()
+    propiosPendientes.clear()
+    setPresencia(null)
+    setMensajes([])
+    setDirectorio(directorioVacio)
+    setNombre(undefined)
+    setPuedeReintentar(false)
+    setConexion({ estado: 'denied', texto })
+  }
+
+  function fallo(texto: string) {
+    perderPresencia()
+    canal.disconnect()
+    setPuedeReintentar(true)
+    setConexion({ estado: 'failed', texto })
+  }
+
+  function reconectar(renovarToken = false) {
+    if (!vigente()) return
+    perderPresencia()
+    canal.disconnect()
+    forzarToken = renovarToken
+    setPuedeReintentar(false)
+    setAviso('')
+    setConexion({ estado: 'reconnecting', texto: 'Reconectando con la sala…' })
+    canal.connect()
+  }
+
+  function recuperarAutenticacion() {
+    if (recuperacionAuth) {
+      denegar(erroresRealtime.UNAUTHENTICATED)
+      return
+    }
+    recuperacionAuth = true
+    reconectar(true)
+  }
+
+  function resolverError(codigo: CodigoRealtime) {
+    if (codigo === 'FORBIDDEN' || codigo === 'INVALID_ROOM') denegar(erroresRealtime[codigo])
+    if (codigo === 'UNAUTHENTICATED') recuperarAutenticacion()
+    if (codigo === 'NOT_JOINED') reconectar()
+  }
+
+  function actualizarPresencia(uids: string[]) {
+    setPresencia(uids)
+    miembros.resolver(uids)
+  }
+
+  function agregarMensaje(mensaje: Message) {
+    if (recibidos.has(mensaje.id)) return
+    recibidos.set(mensaje.id, mensaje)
+    miembros.resolver([mensaje.authorUid])
+    setMensajes([...recibidos.values()].sort((a, b) =>
+      Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id)))
+  }
+
+  function confirmarIngreso() {
+    unido = true
+    recuperacionAuth = false
+    setConexion({ estado: 'connected', texto: 'Conectado a la sala' })
+    if (presenciaInicial !== null) actualizarPresencia(presenciaInicial)
+    antesDelIngreso.forEach(agregarMensaje)
+    antesDelIngreso.clear()
+  }
+
+  canal.on('connect', async () => {
+    if (!vigente()) return
+    clearTimeout(esperaHandshake)
+    const intento = version
+    try {
+      const respuesta = await canal.timeout(ESPERA_ACK).emitWithAck('room:join', { roomId })
+      if (!vigente() || intento !== version) return
+      if (esObjeto(respuesta) && respuesta.ok === true && esDeSala(respuesta.data, roomId)) {
+        confirmarIngreso()
+        return
+      }
+
+      const codigo = codigoRealtime(esObjeto(respuesta) ? respuesta.error : null)
+      if (codigo === 'INVALID_ROOM' || codigo === 'FORBIDDEN' || codigo === 'UNAUTHENTICATED') {
+        resolverError(codigo)
+      } else {
+        fallo('No pudimos ingresar al canal de la sala.')
+      }
+    } catch {
+      if (vigente() && intento === version) fallo('No pudimos confirmar el ingreso a la sala.')
+    }
+  })
+
+  canal.on('connect_error', error => {
+    if (!vigente()) return
+    clearTimeout(esperaHandshake)
+    if ('data' in error && codigoRealtime(error.data) === 'UNAUTHENTICATED') {
+      recuperarAutenticacion()
+    } else if (!canal.active) {
+      fallo('No fue posible conectar con la sala.')
+    } else {
+      perderPresencia()
+      setConexion({ estado: 'lost', texto: 'Conexión interrumpida. Intentaremos restablecerla.' })
+    }
+  })
+
+  canal.on('disconnect', () => {
+    if (!vigente()) return
+    perderPresencia()
+    if (canal.active) {
+      setConexion({ estado: 'lost', texto: 'Conexión perdida. Intentaremos restablecerla.' })
+    } else {
+      setPuedeReintentar(true)
+      setConexion({ estado: 'failed', texto: 'Se cerró la conexión con la sala.' })
+    }
+  })
+
+  canal.io.on('reconnect_attempt', () => {
+    if (vigente()) setConexion({ estado: 'reconnecting', texto: 'Reconectando con la sala…' })
+  })
+  canal.io.on('reconnect_failed', () => {
+    if (vigente()) fallo('No fue posible restablecer la conexión con la sala.')
+  })
+
+  canal.on('room:users', payload => {
+    if (!vigente() || !esDeSala(payload, roomId) || !Array.isArray(payload.users) ||
+        !payload.users.every((uid: unknown): uid is string => typeof uid === 'string' && Boolean(uid.trim()))) return
+
+    presenciaInicial = [...new Set<string>(payload.users)]
+    if (unido) actualizarPresencia(presenciaInicial)
+  })
+  canal.on('chat:message', payload => {
+    if (!vigente() || !esMensaje(payload, roomId)) return
+    if (!unido) {
+      antesDelIngreso.set(payload.id, payload)
+    } else if (envioPendiente && payload.authorUid === user.uid) {
+      // El servidor puede emitir el mensaje persistido antes de su confirmación.
+      propiosPendientes.set(payload.id, payload)
+    } else {
+      agregarMensaje(payload)
+    }
+  })
+  canal.on('room:updated', payload => {
+    if (vigente() && esDeSala(payload, roomId) && typeof payload.name === 'string' && payload.name.trim()) {
+      setNombre(payload.name)
+    }
+  })
+  canal.on('room:deleted', payload => {
+    if (vigente() && esDeSala(payload, roomId)) denegar('La sala ya no está disponible.')
+  })
+  canal.on('room:error', payload => {
+    if (!vigente()) return
+    const codigo = codigoRealtime(payload)
+    if (codigo === 'INTERNAL_ERROR') {
+      // El observador del servidor puede haber retirado el socket del canal.
+      fallo('No pudimos verificar el estado de la sala.')
+    } else {
+      resolverError(codigo)
+      if (codigo === 'INVALID_MESSAGE' || codigo === 'PERSISTENCE_ERROR') setAviso(erroresRealtime[codigo])
+    }
+  })
+
+  function iniciarEnvio() {
+    envioPendiente = true
+  }
+
+  function finalizarEnvio() {
+    envioPendiente = false
+    if (vigente()) propiosPendientes.forEach(agregarMensaje)
+    propiosPendientes.clear()
+  }
+
+  function iniciarSalida() {
+    saliendo = true
+    setPresencia(null)
+    setConexion({ estado: 'leaving', texto: 'Saliendo de la sala…' })
+  }
+
+  function reintentarPerfiles() {
+    miembros.reintentar([
+      ...(presenciaInicial ?? []),
+      ...[...recibidos.values()].map(mensaje => mensaje.authorUid),
+    ])
+  }
+
+  const acciones: Acciones = {
+    async enviar(content) {
+      const texto = content.trim()
+      if (!texto || texto.length > LIMITE_MENSAJE) return erroresRealtime.INVALID_MESSAGE
+      if (!vigente() || !unido || !canal.connected) return 'Espera a que se restablezca la conexión.'
+      if (envioPendiente) return 'Espera la confirmación del mensaje anterior.'
+
+      iniciarEnvio()
+      const intento = version
+      try {
+        const respuesta = await canal.timeout(ESPERA_ACK).emitWithAck('chat:send', { roomId, content: texto })
+        if (!vigente() || intento !== version) return noConfirmado
+        if (esObjeto(respuesta) && respuesta.ok === true &&
+            esMensaje(respuesta.data, roomId) && respuesta.data.authorUid === user.uid) {
+          agregarMensaje(respuesta.data)
+          return null
+        }
+
+        if (!esObjeto(respuesta) || respuesta.ok !== false) return noConfirmado
+        const codigo = codigoRealtime(respuesta.error)
+        resolverError(codigo)
+        return erroresRealtime[codigo]
+      } catch {
+        return noConfirmado
+      } finally {
+        finalizarEnvio()
+      }
+    },
+    async salir() {
+      if (cerrado || saliendo) return
+      iniciarSalida()
+      try {
+        if (canal.connected) await canal.timeout(ESPERA_SALIDA).emitWithAck('room:leave', { roomId })
+      } catch {
+        // La desconexión también retira la presencia en el servidor.
+      } finally {
+        cerrar()
+      }
+    },
+    reintentarPerfiles,
+    reintentar() {
+      reintentarPerfiles()
+      reconectar()
+    },
+  }
+
+  desuscribirToken = onIdTokenChanged(auth, identidad => {
+    if (cerrado || saliendo) return
+    if (identidad !== user) {
+      denegar(erroresRealtime.UNAUTHENTICATED)
+      return
+    }
+    if (!canal.connected || !tokenHandshake) return
+    void identidad.getIdToken().then(token => {
+      if (vigente() && canal.connected && tokenHandshake !== token) reconectar()
+    }).catch(() => {
+      if (vigente() && canal.connected) recuperarAutenticacion()
+    })
+  })
+  miembros.iniciar()
+  canal.connect()
+
+  return { acciones, cerrar }
+}
+
+export type SesionSala = ReturnType<typeof useRoomSocket>

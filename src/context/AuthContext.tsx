@@ -34,50 +34,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [cargando, setCargando] = useState(true)
   const [errorPerfil, setErrorPerfil] = useState<string | null>(null)
 
-const refrescarPerfil = async (): Promise<Perfil | null> => {
-  try {
-    const resultado = await consultarPerfil()
-    setPerfil(resultado)
-    setErrorPerfil(null)
-    return resultado
-  } catch (error) {
-    const status = (error as Error & { status?: number }).status
-
-    if (status === 404) {
-      setPerfil(null)
+  async function cargarPerfil(vigente: () => boolean): Promise<Perfil | null> {
+    try {
+      const resultado = await consultarPerfil()
+      if (!vigente()) return null
+      setPerfil(resultado)
       setErrorPerfil(null)
-      return null
+      return resultado
+    } catch (error) {
+      if (!vigente()) return null
+      const status = (error as Error & { status?: number }).status
+
+      if (status === 404) {
+        setPerfil(null)
+        setErrorPerfil(null)
+        return null
+      }
+
+      setErrorPerfil('No fue posible verificar tu perfil.')
+      throw error
     }
-
-    setErrorPerfil('No fue posible verificar tu perfil.')
-    throw error
   }
-}
 
+  function refrescarPerfil() {
+    const usuario = auth.currentUser
+    return cargarPerfil(() => auth.currentUser === usuario)
+  }
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const ciclo = new AbortController()
+
+    const unsubscribe = onAuthStateChanged(auth, async firebaseUser => {
+      const vigente = () => !ciclo.signal.aborted && auth.currentUser === firebaseUser
+      if (!vigente()) return
+
       setUser(firebaseUser)
       setPerfil(null)
       setErrorPerfil(null)
-
-      if (!firebaseUser) {
-        setCargando(false)
-        return
-      }
-
-      setCargando(true)
+      setCargando(Boolean(firebaseUser))
+      if (!firebaseUser) return
 
       try {
-        await refrescarPerfil()
+        await cargarPerfil(vigente)
       } catch {
         // Se mantiene bloqueado el acceso privado si falla la API.
       } finally {
-        setCargando(false)
+        if (vigente()) setCargando(false)
       }
     })
 
-    return unsubscribe
+    return () => {
+      ciclo.abort()
+      unsubscribe()
+    }
   }, [])
 
   return (

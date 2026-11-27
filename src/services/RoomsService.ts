@@ -136,3 +136,36 @@ export async function unirseSala(roomId: string, signal?: AbortSignal): Promise<
     roomId
   )
 }
+
+export interface RoomMember {
+  uid: string
+  displayName: string
+  username: string | null
+  avatarId: string
+}
+
+export interface RoomMembersResponse {
+  members: RoomMember[]
+}
+
+function esMiembro(valor: unknown): valor is RoomMember {
+  return typeof valor === 'object' && valor !== null &&
+    'uid' in valor && typeof valor.uid === 'string' && Boolean(valor.uid.trim()) &&
+    'displayName' in valor && typeof valor.displayName === 'string' &&
+    'username' in valor && (valor.username === null || typeof valor.username === 'string') &&
+    'avatarId' in valor && typeof valor.avatarId === 'string'
+}
+
+export async function obtenerMiembrosSala(
+  roomId: string,
+  signal?: AbortSignal,
+): Promise<RoomMembersResponse> {
+  const resultado = await peticionSalas('GET', `/${encodeURIComponent(roomId)}/members`, undefined, signal)
+  if (typeof resultado !== 'object' || resultado === null ||
+    !('members' in resultado) || !Array.isArray(resultado.members) ||
+    !resultado.members.every(esMiembro)) {
+    throw new ErrorSala('respuesta')
+  }
+
+  return { members: resultado.members }
+}
