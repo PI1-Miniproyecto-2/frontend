@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { onIdTokenChanged, type User } from 'firebase/auth'
 import { auth } from '../services/Firebase'
 import { crearSocketSala, urlRealtime, ESPERA_ACK, ESPERA_SALIDA } from '../services/RealtimeService'
+import {
+  crearHistorialSala, historialInicial, incorporarMensajes, ordenarMensajes, TAMANO_PAGINA,
+  type EstadoHistorial,
+} from '../services/RoomHistory'
 import { crearDirectorioSala, directorioVacio, type Directorio } from '../services/RoomDirectory'
 import {
   codigoRealtime, erroresRealtime, esDeSala, esMensaje, esObjeto, LIMITE_MENSAJE,
@@ -21,11 +25,15 @@ type Acciones = {
   salir: () => Promise<void>
   reintentar: () => void
   reintentarPerfiles: () => void
+  cargarAnteriores: () => void
+  reintentarHistorial: () => void
 }
 
 export function useRoomSocket(roomId: string, user: User) {
   const [conexion, setConexion] = useState<{ estado: EstadoConexion; texto: string }>(() => urlRealtime ? estadoInicial : sinConfiguracion)
   const [presencia, setPresencia] = useState<string[] | null>(null)
+  const [historial, setHistorial] = useState(historialInicial)
+  const [mensajeEnVivo, setMensajeEnVivo] = useState<Message>()
   const [mensajes, setMensajes] = useState<Message[]>([])
   const [directorio, setDirectorio] = useState(directorioVacio)
   const [aviso, setAviso] = useState('')
@@ -36,7 +44,7 @@ export function useRoomSocket(roomId: string, user: User) {
   useEffect(() => {
     if (!urlRealtime || auth.currentUser !== user) return
     const sesion = iniciarSesionSala(roomId, user, urlRealtime, {
-      setConexion, setPresencia, setMensajes, setDirectorio, setAviso, setNombre, setPuedeReintentar,
+      setConexion, setPresencia, setMensajes, setDirectorio, setAviso, setNombre, setPuedeReintentar, setHistorial, setMensajeEnVivo,
     })
     acciones.current = sesion.acciones
     return () => {
@@ -45,10 +53,12 @@ export function useRoomSocket(roomId: string, user: User) {
     }
   }, [roomId, user])
 
-  return { conexion, presencia, mensajes, directorio, nombre, aviso, puedeReintentar, acciones }
+  return { conexion, presencia, mensajes, historial, mensajeEnVivo, directorio, nombre, aviso, puedeReintentar, acciones }
 }
 
 type Actualizaciones = {
+  setHistorial: (estado: EstadoHistorial) => void
+  setMensajeEnVivo: (mensaje: Message | undefined) => void
   setConexion: (conexion: { estado: EstadoConexion; texto: string }) => void
   setPresencia: (presencia: string[] | null) => void
   setMensajes: (mensajes: Message[]) => void
@@ -59,7 +69,7 @@ type Actualizaciones = {
 }
 
 function iniciarSesionSala(roomId: string, user: User, url: string, {
-  setConexion, setPresencia, setMensajes, setDirectorio, setAviso, setNombre, setPuedeReintentar,
+  setConexion, setPresencia, setMensajes, setDirectorio, setAviso, setNombre, setPuedeReintentar, setHistorial, setMensajeEnVivo,
 }: Actualizaciones) {
   let cerrado = false
   let saliendo = false
@@ -72,6 +82,7 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   let renovacion: ReturnType<typeof setTimeout> | undefined
   let esperaHandshake: ReturnType<typeof setTimeout> | undefined
   let envioPendiente = false
+  let reingresoHistorial = false
   const recibidos = new Map<string, Message>()
   const antesDelIngreso = new Map<string, Message>()
   const propiosPendientes = new Map<string, Message>()
@@ -107,7 +118,31 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   let desuscribirToken: (() => void) | undefined
   const miembros = crearDirectorioSala(roomId, vigente, setDirectorio, codigo => denegar(erroresRealtime[codigo]))
 
+  const historial = crearHistorialSala(roomId, {
+    consultar: before => canal.timeout(ESPERA_ACK).emitWithAck('chat:history', {
+      roomId, limit: TAMANO_PAGINA, ...(before === undefined ? {} : { before }),
+    }),
+    publicar: setHistorial,
+    incorporar: mensajes => {
+      reingresoHistorial = false
+      return combinar(mensajes)
+    },
+    resolverError(codigo) {
+      if (codigo === 'NOT_JOINED' || codigo === 'UNAUTHENTICATED') {
+        if (reingresoHistorial) {
+          if (codigo === 'UNAUTHENTICATED') denegar(erroresRealtime.UNAUTHENTICATED)
+          else fallo('No pudimos recuperar el acceso al canal de la sala.')
+          return
+        }
+        reingresoHistorial = true
+      }
+      resolverError(codigo)
+    },
+    vigente,
+  })
+
   function perderPresencia() {
+    historial.interrumpir()
     version++
     unido = false
     presenciaInicial = null
@@ -122,6 +157,7 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   function cerrar() {
     cerrado = true
     miembros.cerrar()
+    historial.cerrar()
     clearTimeout(renovacion)
     clearTimeout(esperaHandshake)
     desuscribirToken?.()
@@ -138,6 +174,8 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
     propiosPendientes.clear()
     setPresencia(null)
     setMensajes([])
+    setHistorial(historialInicial)
+    setMensajeEnVivo(undefined)
     setDirectorio(directorioVacio)
     setNombre(undefined)
     setPuedeReintentar(false)
@@ -182,12 +220,18 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
     miembros.resolver(uids)
   }
 
+  function combinar(mensajes: Iterable<Message>) {
+    if (!vigente() || !unido) return 0
+    const nuevos = incorporarMensajes(recibidos, mensajes)
+    if (nuevos.length) {
+      miembros.resolver(nuevos.map(mensaje => mensaje.authorUid))
+      setMensajes(ordenarMensajes(recibidos.values()))
+    }
+    return nuevos.length
+  }
+
   function agregarMensaje(mensaje: Message) {
-    if (recibidos.has(mensaje.id)) return
-    recibidos.set(mensaje.id, mensaje)
-    miembros.resolver([mensaje.authorUid])
-    setMensajes([...recibidos.values()].sort((a, b) =>
-      Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id)))
+    if (combinar([mensaje])) setMensajeEnVivo(mensaje)
   }
 
   function confirmarIngreso() {
@@ -197,6 +241,7 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
     if (presenciaInicial !== null) actualizarPresencia(presenciaInicial)
     antesDelIngreso.forEach(agregarMensaje)
     antesDelIngreso.clear()
+    historial.ingresar()
   }
 
   canal.on('connect', async () => {
@@ -303,6 +348,7 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
 
   function iniciarSalida() {
     saliendo = true
+    historial.cerrar()
     setPresencia(null)
     setConexion({ estado: 'leaving', texto: 'Saliendo de la sala…' })
   }
@@ -354,7 +400,10 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
       }
     },
     reintentarPerfiles,
+    cargarAnteriores: historial.cargarAnteriores,
+    reintentarHistorial: historial.reintentar,
     reintentar() {
+      reingresoHistorial = false
       reintentarPerfiles()
       reconectar()
     },
