@@ -6,12 +6,32 @@ export interface Message {
   createdAt: string
 }
 
+export interface ChatHistoryRequest {
+  roomId: string
+  limit?: number
+  before?: string
+}
+
+export interface ChatHistoryPage {
+  roomId: string
+  messages: Message[]
+  hasMore: boolean
+  nextCursor: string | null
+}
+
+export function compararMensajes(a: Message, b: Message) {
+  return Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : Number(a.id > b.id))
+}
+
 export const LIMITE_MENSAJE = 2000
 
 export const erroresRealtime = {
   INVALID_ROOM: 'La sala ya no está disponible.',
   FORBIDDEN: 'Ya no tienes acceso a esta sala.',
   NOT_JOINED: 'Se interrumpió tu ingreso a la sala.',
+  INVALID_HISTORY_LIMIT: 'No pudimos consultar esta página del historial.',
+  INVALID_HISTORY_CURSOR: 'No pudimos continuar desde esta página del historial.',
+  HISTORY_ERROR: 'No pudimos consultar el historial.',
   INVALID_MESSAGE: 'Escribe un mensaje de 1 a 2000 unidades de texto.',
   INTERNAL_ERROR: 'No pudimos completar la operación en la sala.',
   PERSISTENCE_ERROR: 'No pudimos guardar tu mensaje. Inténtalo nuevamente.',
@@ -25,6 +45,7 @@ type Respuesta = (resultado: unknown) => void
 export interface EventosCliente {
   'room:join': (payload: SalaPayload, ack: Respuesta) => void
   'room:leave': (payload: SalaPayload, ack: Respuesta) => void
+  'chat:history': (payload: ChatHistoryRequest, ack: Respuesta) => void
   'chat:send': (payload: SalaPayload & { content: string }, ack: Respuesta) => void
 }
 

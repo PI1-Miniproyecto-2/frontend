@@ -4,7 +4,7 @@ import type { SesionSala } from '../hooks/useRoomSocket'
 import { nombreMiembro } from '../services/RoomDirectory'
 import { LIMITE_MENSAJE } from '../types/realtime'
 
-const horaLocal = new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit' })
+const fechaLocal = new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeStyle: 'short' })
 const foco = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#047857]'
 
 export default function RoomChat({ sesion, uid, visible }: {
@@ -12,18 +12,30 @@ export default function RoomChat({ sesion, uid, visible }: {
   uid: string
   visible: boolean
 }) {
-  const { conexion, mensajes, directorio, acciones, puedeReintentar, aviso } = sesion
+  const { conexion, mensajes, historial, mensajeEnVivo, directorio, acciones, puedeReintentar, aviso } = sesion
   const [borrador, setBorrador] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState('')
   const [nuevos, setNuevos] = useState(false)
   const lista = useRef<HTMLDivElement>(null)
   const cercaDelFinal = useRef(true)
-  const cantidadAnterior = useRef(0)
+  const ultimoVisible = useRef<string | undefined>(undefined)
+  const ultimoEnVivo = useRef<string | undefined>(undefined)
+  const ancla = useRef<{ elemento: HTMLElement; distancia: number } | null>(null)
+  const focoAnteriores = useRef(false)
   const ocupado = useRef(false)
   const longitud = borrador.trim().length
   const excedeLimite = longitud > LIMITE_MENSAJE
   const puedeEnviar = conexion.estado === 'connected' && !enviando && longitud > 0 && !excedeLimite
+
+  function guardarPosicion(panel: HTMLDivElement) {
+    const borde = panel.getBoundingClientRect().top
+    const elemento = Array.from(panel.children).find(hijo =>
+      hijo instanceof HTMLElement && hijo.tagName === 'ARTICLE' && hijo.getBoundingClientRect().bottom > borde)
+    ancla.current = elemento instanceof HTMLElement
+      ? { elemento, distancia: elemento.getBoundingClientRect().top - borde }
+      : null
+  }
 
   function moverAlFinal() {
     if (lista.current) lista.current.scrollTop = lista.current.scrollHeight
@@ -32,14 +44,29 @@ export default function RoomChat({ sesion, uid, visible }: {
   }
 
   useLayoutEffect(() => {
-    if (!visible) return
-    if (cercaDelFinal.current && lista.current) {
-      lista.current.scrollTop = lista.current.scrollHeight
-    } else if (mensajes.length > cantidadAnterior.current) {
-      setNuevos(true)
+    const panel = lista.current
+    if (!visible || !panel) return
+    const ultimo = mensajes.at(-1)?.id
+    const cambioFinal = ultimo !== ultimoVisible.current || mensajeEnVivo?.id !== ultimoEnVivo.current
+    const posicion = ancla.current
+    if (cambioFinal && cercaDelFinal.current) {
+      panel.scrollTop = panel.scrollHeight
+    } else if (posicion && panel.contains(posicion.elemento)) {
+      const distancia = posicion.elemento.getBoundingClientRect().top - panel.getBoundingClientRect().top
+      panel.scrollTop += distancia - posicion.distancia
     }
-    cantidadAnterior.current = mensajes.length
-  }, [mensajes, visible])
+    if (cambioFinal && !cercaDelFinal.current) setNuevos(true)
+    ultimoVisible.current = ultimo
+    ultimoEnVivo.current = mensajeEnVivo?.id
+    guardarPosicion(panel)
+  }, [mensajes, mensajeEnVivo, visible])
+
+  useLayoutEffect(() => {
+    if (!historial.hayAnteriores && focoAnteriores.current) {
+      focoAnteriores.current = false
+      if (visible && document.activeElement === document.body) lista.current?.focus({ preventScroll: true })
+    }
+  }, [historial.hayAnteriores, visible])
 
   async function enviar(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -58,6 +85,21 @@ export default function RoomChat({ sesion, uid, visible }: {
       moverAlFinal()
     }
   }
+
+  const { fase, hayAnteriores, anuncio } = historial
+  const conectado = conexion.estado === 'connected'
+  const puedeCargar = conectado && (fase === 'listo' || fase === 'errorAnteriores')
+  const estadoHistorial = {
+    esperando: '',
+    inicial: 'Cargando historial de mensajes…',
+    listo: anuncio,
+    anteriores: 'Cargando mensajes anteriores…',
+    recuperando: 'Recuperando los mensajes que llegaron mientras estabas desconectado…',
+    interrumpido: 'Historial pendiente de sincronizar.',
+    errorInicial: 'No pudimos cargar el historial. Inténtalo nuevamente.',
+    errorAnteriores: 'No pudimos cargar los mensajes anteriores. Inténtalo nuevamente.',
+    incompleto: 'No pudimos recuperar todos los mensajes. Puedes continuar la sincronización.',
+  }[fase]
 
   function manejarEnter(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing ||
@@ -81,16 +123,46 @@ export default function RoomChat({ sesion, uid, visible }: {
         )}
       </header>
 
-      <div className="relative mt-4">
-        <div ref={lista} role="log" aria-label="Mensajes de la sala" aria-relevant="additions"
-          aria-live={visible ? 'polite' : 'off'} tabIndex={0}
+      <div className="mt-3 text-sm">
+        <p role="status" className="empty:sr-only">{estadoHistorial}</p>
+        {conectado && (fase === 'errorInicial' || fase === 'incompleto') && (
+          <button type="button" onClick={() => {
+            lista.current?.focus({ preventScroll: true })
+            acciones.current?.reintentarHistorial()
+          }} className={`min-h-11 rounded px-2 font-semibold underline ${foco}`}>
+            {fase === 'incompleto' ? 'Continuar sincronización' : 'Reintentar historial'}
+          </button>
+        )}
+        {hayAnteriores && (
+          <button type="button" aria-disabled={!puedeCargar} aria-controls="mensajes-sala"
+            onFocus={() => { focoAnteriores.current = true }}
+            onBlur={() => { focoAnteriores.current = false }}
+            onClick={() => { if (puedeCargar) acciones.current?.cargarAnteriores() }}
+            className={`min-h-11 rounded px-2 font-semibold underline aria-disabled:cursor-wait ${foco}`}>
+            Cargar mensajes anteriores
+          </button>
+        )}
+        {fase === 'listo' && !hayAnteriores && mensajes.length > 0 && (
+          <p className="mt-1">Has llegado al inicio de la conversación.</p>
+        )}
+      </div>
+
+      <div className="sr-only" aria-live={visible ? 'polite' : 'off'}>
+        {mensajeEnVivo && mensajeEnVivo.authorUid !== uid && (
+          <p key={mensajeEnVivo.id}>Mensaje nuevo: {mensajeEnVivo.content}</p>
+        )}
+      </div>
+
+      <div className="relative mt-3">
+        <div id="mensajes-sala" ref={lista} role="region" aria-label="Mensajes de la sala" tabIndex={0}
           onScroll={event => {
             const panel = event.currentTarget
+            guardarPosicion(panel)
             cercaDelFinal.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 64
             if (cercaDelFinal.current) setNuevos(false)
           }}
-          className={`h-[clamp(15rem,46dvh,36rem)] space-y-3 overflow-y-auto rounded-lg bg-[#F5F8F8] p-3 ${foco}`}>
-          {mensajes.length === 0 && <p className="text-sm">Aún no hay mensajes en esta sesión.</p>}
+          className={`h-[clamp(15rem,46dvh,36rem)] space-y-3 overflow-y-auto [overflow-anchor:none] rounded-lg bg-[#F5F8F8] p-3 ${foco}`}>
+          {fase === 'listo' && mensajes.length === 0 && <p className="text-sm">Aún no hay mensajes. ¡Inicia la conversación!</p>}
           {mensajes.map(mensaje => {
             const propio = mensaje.authorUid === uid
             return (
@@ -98,7 +170,7 @@ export default function RoomChat({ sesion, uid, visible }: {
                 className={`w-fit max-w-[90%] rounded-lg p-3 wrap-anywhere ${propio ? 'ml-auto bg-[#DDF7F2]' : 'mr-auto border border-teal-900/20 bg-white'}`}>
                 <p className="flex flex-wrap items-baseline gap-x-2 text-xs">
                   <strong>{nombreMiembro(directorio, mensaje.authorUid)}{propio && ' (Tú)'}</strong>
-                  <time dateTime={mensaje.createdAt}>{horaLocal.format(new Date(mensaje.createdAt))}</time>
+                  <time dateTime={mensaje.createdAt}>{fechaLocal.format(new Date(mensaje.createdAt))}</time>
                 </p>
                 <p className="mt-1 whitespace-pre-wrap">{mensaje.content}</p>
               </article>
