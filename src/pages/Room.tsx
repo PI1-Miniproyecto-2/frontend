@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigationType, useParams } from 'react-router-dom'
-import { ArrowLeft, CameraOff, Copy, MessageCircle, MicOff, MonitorUp, Users } from 'lucide-react'
+import { Link, useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom'
+import { ArrowLeft, BookOpen, CameraOff, Copy, MessageCircle, MicOff, MonitorUp } from 'lucide-react'
+import type { User } from 'firebase/auth'
+import ParticipantsList from '../components/ParticipantsList'
+import RoomChat from '../components/RoomChat'
+import { useRoomSocket } from '../hooks/useRoomSocket'
 import { useAuth } from '../context/AuthContext'
+import { auth } from '../services/Firebase'
 import {
   ErrorSala,
   mensajeErrorSala,
@@ -13,10 +18,10 @@ import {
 type EstadoSala =
   | { tipo: 'cargando' }
   | { tipo: 'error'; mensaje: string; reintentar: boolean }
-  | { tipo: 'lista'; sala: Sala }
+  | { tipo: 'lista'; sala: Sala; user: User }
 
 const focoClaro = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#70DCCB]'
-const volver = 'inline-flex min-h-10 items-center rounded-lg bg-[#047857] px-4 py-2 font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#047857]'
+const volver = 'inline-flex min-h-11 items-center rounded-lg bg-[#047857] px-4 py-2 font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#047857]'
 
 function Room() {
   const codigo = useParams().id?.trim() ?? ''
@@ -40,21 +45,19 @@ function Room() {
     <SalaAutorizada
       key={JSON.stringify([user.uid, codigo, location.key])}
       codigo={codigo}
-      uid={user.uid}
+      user={user}
       confirmarIngreso={tipoNavegacion === 'PUSH' && location.state?.salaUnida === codigo}
     />
   )
 }
 
-function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
+function SalaAutorizada({ codigo, user, confirmarIngreso }: {
   codigo: string
-  uid: string
+  user: User
   confirmarIngreso: boolean
 }) {
   const [estado, setEstado] = useState<EstadoSala>({ tipo: 'cargando' })
   const [intento, setIntento] = useState(0)
-  const [chatAbierto, setChatAbierto] = useState(true)
-  const [mensajeCopia, setMensajeCopia] = useState('')
   const encabezado = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
@@ -62,15 +65,16 @@ function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
 
     async function cargarSala() {
       try {
+        if (auth.currentUser !== user) return
         const sala = await obtenerSala(codigo, solicitud.signal)
-        if (solicitud.signal.aborted) return
+        if (solicitud.signal.aborted || auth.currentUser !== user) return
 
-        if (sala.ownerUid !== uid && !sala.participantUids.includes(uid)) {
+        if (sala.ownerUid !== user.uid && !sala.participantUids.includes(user.uid)) {
           throw new ErrorSala('http', 404)
         }
-        setEstado({ tipo: 'lista', sala })
+        setEstado({ tipo: 'lista', sala, user })
       } catch (error) {
-        if (solicitud.signal.aborted) return
+        if (solicitud.signal.aborted || auth.currentUser !== user) return
 
         setEstado({
           tipo: 'error',
@@ -84,22 +88,13 @@ function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
 
     void cargarSala()
     return () => solicitud.abort()
-  }, [codigo, intento, uid])
+  }, [codigo, intento, user])
 
   useEffect(() => {
     encabezado.current?.focus()
   }, [estado.tipo])
 
-  async function copiarCodigo(roomId: string) {
-    try {
-      await navigator.clipboard.writeText(roomId)
-      setMensajeCopia('Código copiado.')
-    } catch {
-      setMensajeCopia('No se pudo copiar el código. Puedes seleccionarlo y copiarlo manualmente.')
-    }
-  }
-
-  if (estado.tipo === 'cargando') {
+  if (estado.tipo === 'cargando' || (estado.tipo === 'lista' && estado.user !== user)) {
     return (
       <section className="rounded-xl bg-white p-5">
         <h1 tabIndex={-1} ref={encabezado} className="text-xl font-bold">Abriendo sala</h1>
@@ -133,14 +128,64 @@ function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
     )
   }
 
-  const { sala } = estado
-  const rol = sala.ownerUid === uid ? 'Anfitrión' : 'Participante'
+  return <InteriorSala sala={estado.sala} user={user} confirmarIngreso={confirmarIngreso} />
+}
+
+function InteriorSala({ sala, user, confirmarIngreso }: {
+  sala: Sala
+  user: User
+  confirmarIngreso: boolean
+}) {
+  const sesion = useRoomSocket(sala.roomId, user)
+  const navegar = useNavigate()
+  const [chatAbierto, setChatAbierto] = useState(true)
+  const [mensajeCopia, setMensajeCopia] = useState('')
+  const encabezado = useRef<HTMLHeadingElement>(null)
+  const salidaEnCurso = useRef(false)
+  const montado = useRef(false)
+  const denegado = sesion.conexion.estado === 'denied'
+  const rol = sala.ownerUid === user.uid ? 'Anfitrión' : 'Participante'
+
+  useEffect(() => {
+    montado.current = true
+    return () => { montado.current = false }
+  }, [])
+
+  useEffect(() => {
+    encabezado.current?.focus()
+  }, [denegado])
+
+  async function salir() {
+    if (salidaEnCurso.current) return
+    salidaEnCurso.current = true
+    await sesion.acciones.current?.salir()
+    if (montado.current) navegar('/rooms')
+  }
+
+  async function copiarCodigo(roomId: string) {
+    try {
+      await navigator.clipboard.writeText(roomId)
+      setMensajeCopia('Código copiado.')
+    } catch {
+      setMensajeCopia('No se pudo copiar el código. Puedes seleccionarlo y copiarlo manualmente.')
+    }
+  }
+
+  if (denegado) {
+    return (
+      <section className="rounded-xl bg-white p-5">
+        <h1 tabIndex={-1} ref={encabezado} className="text-xl font-bold">Sala no disponible</h1>
+        <p role="alert" className="my-3 text-red-800">{sesion.conexion.texto}</p>
+        <Link to="/rooms" className={volver}>Volver a Mis salas</Link>
+      </section>
+    )
+  }
 
   return (
     <div className="flex min-h-[calc(100vh-120px)] flex-col rounded-xl bg-[#062E33] text-white">
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-white/10 bg-[#05272C] px-4 py-3">
         <div className="min-w-0">
-          <h1 tabIndex={-1} ref={encabezado} aria-describedby={confirmarIngreso ? 'confirmacion-ingreso' : undefined} className="text-xl font-bold wrap-anywhere">{sala.name}</h1>
+          <h1 tabIndex={-1} ref={encabezado} aria-describedby={confirmarIngreso ? 'confirmacion-ingreso' : undefined} className="text-xl font-bold wrap-anywhere">{sesion.nombre ?? sala.name}</h1>
           <p className="text-sm text-teal-100 wrap-anywhere">Código: {sala.roomId}</p>
           <p className="text-sm text-teal-100">{rol}</p>
         </div>
@@ -149,38 +194,36 @@ function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
           <button
             type="button"
             onClick={() => void copiarCodigo(sala.roomId)}
-            className={`inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/50 px-3 py-2 hover:bg-white/10 ${focoClaro}`}
+            className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/50 px-3 py-2 hover:bg-white/10 ${focoClaro}`}
           >
             <Copy size={15} aria-hidden="true" />
             Copiar código
           </button>
-          <Link
-            to="/rooms"
-            className={`inline-flex min-h-10 items-center gap-2 rounded-lg bg-red-800 px-3 py-2 font-semibold hover:bg-red-900 ${focoClaro}`}
+          <button
+            type="button"
+            onClick={() => void salir()}
+            aria-disabled={sesion.conexion.estado === 'leaving'}
+            className={`inline-flex min-h-11 items-center gap-2 rounded-lg bg-red-800 px-3 py-2 font-semibold hover:bg-red-900 ${focoClaro}`}
           >
             <ArrowLeft size={17} aria-hidden="true" />
-            Salir de la sala
-          </Link>
+            {sesion.conexion.estado === 'leaving' ? 'Saliendo de la sala…' : 'Salir de la sala'}
+          </button>
         </div>
       </header>
 
+      {!chatAbierto && <p role="status" className="px-4 pt-3 text-sm text-teal-100">{sesion.conexion.texto}</p>}
       <div className="px-4 text-sm text-teal-100">
         {confirmarIngreso && <p id="confirmacion-ingreso" className="pt-3">Ingresaste a la sala.</p>}
         <p role="status" className={mensajeCopia ? 'pt-3' : undefined}>{mensajeCopia}</p>
       </div>
 
-      <div className="flex flex-1 flex-col xl:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="grid flex-1 gap-2 p-3 sm:grid-cols-2">
-            <div className="flex min-h-40 items-center justify-center rounded-xl border-2 border-[#13B8A6] bg-[#103E43]">
-              <span className="grid size-20 place-items-center rounded-full bg-[#B8E8E2] text-xl font-bold text-[#073B43]">Tú</span>
-            </div>
-            <div className="flex min-h-40 flex-col items-center justify-center rounded-xl bg-[#10383E] p-4 text-center">
-              <Users size={32} className="mb-3 text-[#70DCCB]" aria-hidden="true" />
-              <p>Comparte el código para invitar a tus compañeros.</p>
-              <p className="mt-1 text-sm text-teal-100">La presencia en tiempo real estará disponible más adelante.</p>
-            </div>
-          </div>
+      <div className={`grid flex-1 items-start gap-3 p-3 ${chatAbierto ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]' : ''}`}>
+        <div className="min-w-0 space-y-3">
+          <section aria-labelledby="estudio-titulo" className="flex items-center gap-3 rounded-xl bg-[#0A3C3E] p-4">
+            <BookOpen size={24} className="shrink-0 text-[#70DCCB]" aria-hidden="true" />
+            <h2 id="estudio-titulo" className="text-lg font-bold">Espacio de estudio</h2>
+          </section>
+          <ParticipantsList sesion={sesion} ownerUid={sala.ownerUid} uid={user.uid} />
 
           <footer className="border-t border-white/10 px-4 py-4 text-center">
             <div className="flex flex-wrap items-center justify-center gap-3">
@@ -195,10 +238,10 @@ function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
               </button>
               <button
                 type="button"
-                onClick={() => setChatAbierto(!chatAbierto)}
+                onClick={() => setChatAbierto(actual => !actual)}
                 aria-expanded={chatAbierto}
                 aria-controls="chat-sala"
-                className={`inline-flex min-h-10 items-center gap-2 rounded-lg bg-[#70DCCB] px-3 py-2 font-semibold text-[#073B43] ${focoClaro}`}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-lg bg-[#70DCCB] px-3 py-2 font-semibold text-[#073B43] ${focoClaro}`}
               >
                 <MessageCircle size={17} aria-hidden="true" />
                 {chatAbierto ? 'Ocultar chat' : 'Mostrar chat'}
@@ -208,10 +251,7 @@ function SalaAutorizada({ codigo, uid, confirmarIngreso }: {
           </footer>
         </div>
 
-        <aside id="chat-sala" hidden={!chatAbierto} className="rounded-b-xl border-t border-gray-200 bg-white p-4 text-[#073B43] xl:w-64 xl:rounded-bl-none xl:border-l xl:border-t-0">
-          <h2 className="font-bold">Chat de la sala</h2>
-          <p className="mt-2 text-sm">La mensajería en tiempo real aún no está disponible.</p>
-        </aside>
+        <RoomChat sesion={sesion} uid={user.uid} visible={chatAbierto} />
       </div>
     </div>
   )
