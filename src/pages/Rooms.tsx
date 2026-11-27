@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   BookOpen,
@@ -9,41 +9,49 @@ import {
   RefreshCw,
   AlertCircle,
 } from 'lucide-react'
+import EditRoomModal from '../components/EditRoomModal'
+import { useAuth } from '../context/AuthContext'
+import { auth } from '../services/Firebase'
 import {
+  guardarNombreSala,
   obtenerMisSalas,
   type Sala,
 } from '../services/RoomsService'
 
 function Rooms() {
+  const { user } = useAuth()
   const [salas, setSalas] = useState<Sala[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [copiadoId, setCopiadoId] = useState<string | null>(null)
   const [mensaje, setMensaje] = useState('')
+  const [confirmacion, setConfirmacion] = useState('')
+  const consulta = useRef<AbortController | null>(null)
 
   const cargarSalas = useCallback(async () => {
+    if (!user || auth.currentUser !== user) return
+    consulta.current?.abort()
+    const solicitud = new AbortController()
+    consulta.current = solicitud
+    const vigente = () => !solicitud.signal.aborted && auth.currentUser === user
     setCargando(true)
     setError('')
 
     try {
-      const resultado = await obtenerMisSalas()
-
-      if (!Array.isArray(resultado)) {
-        throw new Error('La respuesta de las salas no es válida.')
-      }
-
-      setSalas(resultado)
+      const resultado = await obtenerMisSalas(solicitud.signal)
+      if (vigente()) setSalas(resultado)
     } catch {
-      setError(
+      if (vigente()) setError(
         'No pudimos cargar tus salas. Comprueba tu conexión e inténtalo nuevamente.'
       )
     } finally {
-      setCargando(false)
+      if (vigente()) setCargando(false)
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     void cargarSalas()
+    return () => consulta.current?.abort()
   }, [cargarSalas])
 
   async function copiarId(roomId: string) {
@@ -81,6 +89,8 @@ function Rooms() {
       <p className="sr-only" role="status" aria-live="polite">
         {mensaje}
       </p>
+
+      <p role="status" className="mb-4 font-semibold break-words text-[#047857] empty:sr-only">{confirmacion}</p>
 
       {cargando ? (
         <div
@@ -181,6 +191,21 @@ function Rooms() {
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-2">
+                  {user && sala.ownerUid === user.uid && (
+                    <EditRoomModal sala={sala} user={user}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DCE9E8] px-4 py-2.5 text-sm font-semibold text-[#073B43] hover:bg-[#F1F7F6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#087F77]"
+                      onGuardar={async (nombre, signal) => {
+                        setConfirmacion('')
+                        const { sala: actualizada, confirmado } = await guardarNombreSala(sala.roomId, nombre, signal)
+                        if (!signal.aborted && auth.currentUser === user) {
+                          setSalas(actuales => actuales.map(actual =>
+                            actual.roomId === actualizada.roomId ? { ...actual, name: actualizada.name } : actual))
+                        }
+                        return confirmado
+                      }}
+                      onGuardado={() => setConfirmacion('El nombre de la sala se actualizó correctamente.')} />
+                  )}
+
                   <button
                     type="button"
                     onClick={() => void copiarId(sala.roomId)}

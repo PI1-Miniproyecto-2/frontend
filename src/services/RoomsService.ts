@@ -5,8 +5,6 @@ const API_URL = (
   import.meta.env.VITE_API_URL || 'http://localhost:3000'
 ).replace(/\/$/, '')
 
-export type PrivacidadSala = 'private' | 'public'
-
 export interface CrearSalaDatos {
   name: string
 }
@@ -56,7 +54,7 @@ export function mensajeErrorSala(error: unknown, accion: 'ingresar' | 'abrir') {
 }
 
 async function peticionSalas(
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PATCH',
   ruta = '',
   datos?: CrearSalaDatos,
   signal?: AbortSignal
@@ -112,8 +110,82 @@ export async function crearSala(datos: CrearSalaDatos): Promise<Sala> {
   return validarSala(await peticionSalas('POST', '', datos))
 }
 
-export async function obtenerMisSalas(): Promise<Sala[]> {
-  const resultado = await peticionSalas('GET')
+export const MAX_NOMBRE_SALA = 100
+
+export function validarNombreSala(nombre: string): string {
+  const longitud = nombre.trim().length
+  if (longitud === 0) return 'Escribe un nombre para la sala.'
+  if (longitud > MAX_NOMBRE_SALA) return 'El nombre debe tener entre 1 y 100 unidades de texto.'
+  return ''
+}
+
+export async function editarSala(roomId: string, name: string, signal?: AbortSignal): Promise<Sala> {
+  if (!PATRON_CODIGO_SALA.test(roomId) || validarNombreSala(name)) throw new ErrorSala('http', 400)
+  return validarSala(await peticionSalas('PATCH', `/${encodeURIComponent(roomId)}`, { name: name.trim() }, signal), roomId)
+}
+
+function edicionIncierta(error: unknown) {
+  return error instanceof ErrorSala && (
+    error.tipo === 'conexion' || error.tipo === 'respuesta' ||
+    (error.status !== undefined && error.status >= 500)
+  )
+}
+
+async function conPlazo<T>(signal: AbortSignal, ms: number, ejecutar: (signal: AbortSignal) => Promise<T>) {
+  signal.throwIfAborted()
+  const solicitud = new AbortController()
+  const cancelar = () => solicitud.abort()
+  signal.addEventListener('abort', cancelar, { once: true })
+  const plazo = setTimeout(cancelar, ms)
+  try {
+    return await ejecutar(solicitud.signal)
+  } catch (error) {
+    if (solicitud.signal.aborted && !signal.aborted) throw new ErrorSala('conexion')
+    throw error
+  } finally {
+    clearTimeout(plazo)
+    signal.removeEventListener('abort', cancelar)
+  }
+}
+
+export function consultarSalaConPlazo(roomId: string, signal: AbortSignal) {
+  return conPlazo(signal, 8_000, consulta => obtenerSala(roomId, consulta))
+}
+
+export async function guardarNombreSala(roomId: string, name: string, signal: AbortSignal) {
+  try {
+    const sala = await conPlazo(signal, 12_000, peticion => editarSala(roomId, name, peticion))
+    return { sala, confirmado: true }
+  } catch (error) {
+    signal.throwIfAborted()
+    if (!edicionIncierta(error)) throw error
+
+    // Una respuesta perdida puede corresponder a una escritura exitosa.
+    const sala = await consultarSalaConPlazo(roomId, signal)
+      .catch((errorConsulta: unknown) => {
+        if (errorConsulta instanceof ErrorSala && [401, 403, 404].includes(errorConsulta.status ?? 0)) throw errorConsulta
+        throw error
+      })
+    return { sala, confirmado: sala.name === name.trim() }
+  }
+}
+
+export function mensajeErrorEdicion(error: unknown) {
+  if (edicionIncierta(error)) {
+    return 'No pudimos confirmar el cambio. Comprueba el nombre actual antes de volver a guardar.'
+  }
+  if (error instanceof ErrorSala) {
+    if (error.status === 400) return 'Revisa el nombre de la sala. Debe tener entre 1 y 100 unidades de texto.'
+    if (error.status === 401 || error.tipo === 'autenticacion') return 'No pudimos verificar tu sesión. Vuelve a iniciar sesión.'
+    if (error.status === 403) return 'No tienes permiso para editar esta sala.'
+    if (error.status === 404) return 'La sala ya no está disponible.'
+    if (error.status === 429) return 'Hay demasiadas solicitudes. Espera un momento antes de volver a guardar.'
+  }
+  return 'No pudimos guardar los cambios. Inténtalo nuevamente.'
+}
+
+export async function obtenerMisSalas(signal?: AbortSignal): Promise<Sala[]> {
+  const resultado = await peticionSalas('GET', '', undefined, signal)
   if (typeof resultado !== 'object' || resultado === null ||
     !('rooms' in resultado) || !Array.isArray(resultado.rooms) ||
     !resultado.rooms.every(esSala)) {

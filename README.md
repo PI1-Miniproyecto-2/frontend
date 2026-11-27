@@ -15,3 +15,11 @@ Tras una reconexión, el cliente consulta desde los mensajes más recientes hast
 El servidor conserva la autorización del historial y Firestore es la fuente de los mensajes persistidos. Las fechas visibles usan la zona horaria local del navegador.
 
 Para ejecutar las pruebas automatizadas de paginación, deduplicación y reconexión, usa `node --test tests/room-history.test.mjs`.
+
+### Edición de salas (US-07)
+
+El anfitrión puede abrir **Editar sala** desde **Mis salas** o desde la cabecera de la sala. El formulario envía únicamente `{ name }` a `PATCH /api/v1/rooms/{roomId}`. Backend API verifica la sesión, el perfil y el propietario. El nombre admite de 1 a 100 unidades UTF-16 después de recortar los espacios de los extremos.
+
+Backend Realtime notifica a los participantes mediante `room:updated`. El cliente conserva la sesión de chat y consulta el nombre por REST tras reingresar después de una desconexión. Si una respuesta de edición es incierta o REST y Socket.IO discrepan, el cliente vuelve a consultar la sala. El contrato carece de una versión común para ordenar eventos y respuestas concurrentes.
+
+Pruebas automatizadas de edición: `node --test tests/room-edit.test.mjs`.

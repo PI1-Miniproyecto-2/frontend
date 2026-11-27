@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom'
 import { ArrowLeft, BookOpen, CameraOff, Copy, MessageCircle, MicOff, MonitorUp } from 'lucide-react'
 import type { User } from 'firebase/auth'
+import EditRoomModal from '../components/EditRoomModal'
 import ParticipantsList from '../components/ParticipantsList'
 import RoomChat from '../components/RoomChat'
 import { useRoomSocket } from '../hooks/useRoomSocket'
@@ -9,6 +10,7 @@ import { useAuth } from '../context/AuthContext'
 import { auth } from '../services/Firebase'
 import {
   ErrorSala,
+  guardarNombreSala,
   mensajeErrorSala,
   obtenerSala,
   PATRON_CODIGO_SALA,
@@ -140,10 +142,14 @@ function InteriorSala({ sala, user, confirmarIngreso }: {
   const navegar = useNavigate()
   const [chatAbierto, setChatAbierto] = useState(true)
   const [mensajeCopia, setMensajeCopia] = useState('')
+  const [confirmacionEdicion, setConfirmacionEdicion] = useState('')
+  const [nombreRest, setNombreRest] = useState<string>()
+  const nombre = sesion.nombre ?? nombreRest ?? sala.name
   const encabezado = useRef<HTMLHeadingElement>(null)
   const salidaEnCurso = useRef(false)
   const montado = useRef(false)
-  const denegado = sesion.conexion.estado === 'denied'
+  const [errorAccesoRest, setErrorAccesoRest] = useState('')
+  const denegado = sesion.conexion.estado === 'denied' || Boolean(errorAccesoRest)
   const rol = sala.ownerUid === user.uid ? 'Anfitrión' : 'Participante'
 
   useEffect(() => {
@@ -175,7 +181,7 @@ function InteriorSala({ sala, user, confirmarIngreso }: {
     return (
       <section className="rounded-xl bg-white p-5">
         <h1 tabIndex={-1} ref={encabezado} className="text-xl font-bold">Sala no disponible</h1>
-        <p role="alert" className="my-3 text-red-800">{sesion.conexion.texto}</p>
+        <p role="alert" className="my-3 text-red-800">{errorAccesoRest || sesion.conexion.texto}</p>
         <Link to="/rooms" className={volver}>Volver a Mis salas</Link>
       </section>
     )
@@ -185,12 +191,31 @@ function InteriorSala({ sala, user, confirmarIngreso }: {
     <div className="flex min-h-[calc(100vh-120px)] flex-col rounded-xl bg-[#062E33] text-white">
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-t-xl border-b border-white/10 bg-[#05272C] px-4 py-3">
         <div className="min-w-0">
-          <h1 tabIndex={-1} ref={encabezado} aria-describedby={confirmarIngreso ? 'confirmacion-ingreso' : undefined} className="text-xl font-bold wrap-anywhere">{sesion.nombre ?? sala.name}</h1>
+          <h1 tabIndex={-1} ref={encabezado} aria-describedby={confirmarIngreso ? 'confirmacion-ingreso' : undefined} className="text-xl font-bold wrap-anywhere">{nombre}</h1>
           <p className="text-sm text-teal-100 wrap-anywhere">Código: {sala.roomId}</p>
           <p className="text-sm text-teal-100">{rol}</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {sala.ownerUid === user.uid && sesion.conexion.estado !== 'leaving' && (
+            <EditRoomModal sala={{ ...sala, name: nombre }} user={user}
+              className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/50 px-3 py-2 hover:bg-white/10 ${focoClaro}`}
+              onGuardar={async (nuevo, signal) => {
+                setConfirmacionEdicion('')
+                if (sesion.acciones.current) return sesion.acciones.current.editarNombre(nuevo, signal)
+                try {
+                  const resultado = await guardarNombreSala(sala.roomId, nuevo, signal)
+                  if (!signal.aborted && auth.currentUser === user) setNombreRest(resultado.sala.name)
+                  return resultado.confirmado
+                } catch (error) {
+                  if (!signal.aborted && auth.currentUser === user && error instanceof ErrorSala && error.status === 404) {
+                    setErrorAccesoRest('La sala ya no está disponible.')
+                  }
+                  throw error
+                }
+              }}
+              onGuardado={() => setConfirmacionEdicion('El nombre de la sala se actualizó correctamente.')} />
+          )}
           <button
             type="button"
             onClick={() => void copiarCodigo(sala.roomId)}
@@ -214,6 +239,10 @@ function InteriorSala({ sala, user, confirmarIngreso }: {
       {!chatAbierto && <p role="status" className="px-4 pt-3 text-sm text-teal-100">{sesion.conexion.texto}</p>}
       <div className="px-4 text-sm text-teal-100">
         {confirmarIngreso && <p id="confirmacion-ingreso" className="pt-3">Ingresaste a la sala.</p>}
+        <p role="status" className="sr-only">
+          {sala.ownerUid !== user.uid && sesion.nombre !== undefined ? `Nombre de la sala: ${nombre}.` : ''}
+        </p>
+        <p role="status" className="pt-3 font-semibold empty:sr-only">{confirmacionEdicion}</p>
         <p role="status" className={mensajeCopia ? 'pt-3' : undefined}>{mensajeCopia}</p>
       </div>
 

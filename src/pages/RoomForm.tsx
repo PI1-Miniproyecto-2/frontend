@@ -1,17 +1,13 @@
 
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { BookOpen, ShieldCheck, CheckCircle2, Copy } from 'lucide-react'
-import { crearSala, type Sala, type PrivacidadSala } from '../services/RoomsService'
+import { crearSala, validarNombreSala, type Sala } from '../services/RoomsService'
 
 function RoomForm() {
   const navigate = useNavigate()
-  const { id } = useParams<{ id: string }>()
-  const isEditing = Boolean(id)
 
   const [nombre, setNombre] = useState('')
-  const [descripcion, setDescripcion] = useState('')
-  const [privacidad, setPrivacidad] = useState<PrivacidadSala>('private')
   const [error, setError] = useState('')
   const [guardando, setGuardando] = useState(false)
   const [salaCreada, setSalaCreada] = useState<Sala | null>(null)
@@ -23,29 +19,17 @@ function RoomForm() {
 
     setError('')
 
-    if (isEditing) {
-      setError('La edición de salas todavía no está disponible.')
-      return
-    }
-
-    if (nombre.trim().length < 3 || nombre.trim().length > 80) {
-      setError('El nombre debe tener entre 3 y 80 caracteres.')
-      return
-    }
-
-    if (descripcion.trim().length > 300) {
-      setError('La descripción no puede superar los 300 caracteres.')
+    const errorNombre = validarNombreSala(nombre)
+    if (errorNombre) {
+      setError(errorNombre)
       return
     }
 
     setGuardando(true)
 
-      try {
-const sala = await crearSala({
-  name: nombre.trim(),
-})
-
-setSalaCreada(sala)
+    try {
+      const sala = await crearSala({ name: nombre.trim() })
+      setSalaCreada(sala)
     } catch (err) {
       setError(
         err instanceof Error
@@ -148,7 +132,7 @@ setSalaCreada(sala)
 
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[#073B43]">
-              {isEditing ? 'Editar sala' : 'Crear nueva sala'}
+              Crear nueva sala
             </h1>
             <p className="mt-1 text-sm text-gray-500">
               Prepara un espacio para su próxima sesión.
@@ -165,7 +149,6 @@ setSalaCreada(sala)
               id="nombre-sala"
               type="text"
               value={nombre}
-              maxLength={80}
               required
               aria-required="true"
               placeholder="Ej. Sala de programación"
@@ -174,24 +157,6 @@ setSalaCreada(sala)
                 setError('')
               }}
               className="w-full rounded-xl border border-[#DCE9E8] bg-[#F5F9F9] px-4 py-3 text-sm text-[#073B43] outline-none transition focus:border-[#18B7A9] focus:ring-2 focus:ring-[#70DCCB]"
-            />
-          </div>
-
-          <div className="mb-6">
-            <label htmlFor="descripcion-sala" className="mb-2 block text-sm font-medium text-[#073B43]">
-              Descripción
-            </label>
-            <textarea
-              id="descripcion-sala"
-              value={descripcion}
-              maxLength={300}
-              rows={4}
-              placeholder="¿Qué van a estudiar?"
-              onChange={(e) => {
-                setDescripcion(e.target.value)
-                setError('')
-              }}
-              className="w-full resize-y rounded-xl border border-[#DCE9E8] bg-[#F5F9F9] px-4 py-3 text-sm text-[#073B43] outline-none transition focus:border-[#18B7A9] focus:ring-2 focus:ring-[#70DCCB]"
             />
           </div>
 
@@ -213,45 +178,6 @@ setSalaCreada(sala)
             </div>
           </div>
 
-          <fieldset className="mb-7">
-            <legend className="mb-2 text-sm font-medium text-[#073B43]">
-              Privacidad
-            </legend>
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {([
-                ['private', 'Privada', 'Solo ingresan quienes tengan el código.'],
-                ['public', 'Pública', 'Cualquier estudiante con el enlace.'],
-              ] as const).map(([valor, titulo, detalle]) => (
-                <label
-                  key={valor}
-                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition ${
-                    privacidad === valor
-                      ? 'border-[#42CFC1] bg-[#EAFBF7]'
-                      : 'border-[#DCE9E8] bg-white'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="privacidad"
-                    value={valor}
-                    checked={privacidad === valor}
-                    onChange={() => setPrivacidad(valor)}
-                    className="accent-[#079C8D]"
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-[#073B43]">
-                      {titulo}
-                    </span>
-                    <span className="block text-xs text-gray-500">
-                      {detalle}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
           {error && (
             <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
               {error}
@@ -271,11 +197,7 @@ setSalaCreada(sala)
               disabled={guardando}
               className="rounded-xl bg-[#70DCCB] px-4 py-2.5 text-sm font-semibold text-[#073B43] transition hover:bg-[#50CDBA] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {guardando
-                ? 'Creando sala...'
-                : isEditing
-                  ? 'Guardar cambios'
-                  : 'Crear sala'}
+              {guardando ? 'Creando sala...' : 'Crear sala'}
             </button>
           </div>
         </form>

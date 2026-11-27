@@ -124,7 +124,7 @@ function App() {
 
             <Route
               path="/rooms/edit/:id"
-              element={<RoomForm />}
+              element={<Navigate to="/rooms" replace />}
             />
 
             <Route
