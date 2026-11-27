@@ -70,7 +70,7 @@ function Rooms() {
         </div>
 
         <Link
-          to="/rooms/new"
+          to="/rooms/create"
           className="inline-flex items-center gap-2 rounded-xl bg-[#70DCCB] px-5 py-3 text-sm font-semibold text-[#073B43] hover:bg-[#50CDBA] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#087F77]"
         >
           <Plus size={18} aria-hidden="true" />
@@ -141,7 +141,7 @@ function Rooms() {
           </p>
 
           <Link
-            to="/rooms/new"
+            to="/rooms/create"
             className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#70DCCB] px-5 py-3 font-semibold text-[#073B43] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#087F77]"
           >
             <Plus size={18} aria-hidden="true" />

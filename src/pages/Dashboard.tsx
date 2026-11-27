@@ -1,9 +1,12 @@
 
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   obtenerMisSalas,
+  unirseSala,
+  mensajeErrorSala,
+  PATRON_CODIGO_SALA,
   type Sala,
 } from '../services/RoomsService'
 import {
@@ -22,6 +25,16 @@ function Dashboard() {
   const { perfil, user } = useAuth()
 
   const [roomCode, setRoomCode] = useState('')
+  const [ingresando, setIngresando] = useState(false)
+  const [errorIngreso, setErrorIngreso] = useState('')
+  const campoCodigo = useRef<HTMLInputElement>(null)
+  const solicitudIngreso = useRef<AbortController | null>(null)
+
+  useEffect(() => () => solicitudIngreso.current?.abort(), [])
+
+  useEffect(() => {
+    if (errorIngreso) campoCodigo.current?.focus()
+  }, [errorIngreso])
   const [salas, setSalas] = useState<Sala[]>([])
   const [cargando, setCargando] = useState(true)
   const [errorSalas, setErrorSalas] = useState('')
@@ -87,16 +100,40 @@ function Dashboard() {
     )
     .slice(0, 5)
 
-  const handleJoinRoom = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+  async function handleJoinRoom(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (solicitudIngreso.current) return
 
-    if (!roomCode.trim()) return
+    const codigo = roomCode.trim()
+    if (!PATRON_CODIGO_SALA.test(codigo)) {
+      const mensaje = codigo
+        ? 'El código debe contener 20 letras o números'
+        : 'Ingresa el código de la sala'
+      if (errorIngreso === mensaje) campoCodigo.current?.focus()
+      setErrorIngreso(mensaje)
+      return
+    }
 
-    // El ingreso de participantes por código se integrará
-    // cuando el backend permita validar y registrar el acceso.
-    setMensaje(
-      'El ingreso de participantes por código todavía no está disponible.'
-    )
+    const solicitud = new AbortController()
+    solicitudIngreso.current = solicitud
+    setErrorIngreso('')
+    setIngresando(true)
+
+    try {
+      const sala = await unirseSala(codigo, solicitud.signal)
+      if (!solicitud.signal.aborted) {
+        navigate(`/room/${encodeURIComponent(sala.roomId)}`, {
+          state: { salaUnida: sala.roomId },
+        })
+      }
+    } catch (error) {
+      if (!solicitud.signal.aborted) setErrorIngreso(mensajeErrorSala(error, 'ingresar'))
+    } finally {
+      if (!solicitud.signal.aborted) {
+        solicitudIngreso.current = null
+        setIngresando(false)
+      }
+    }
   }
 
   async function copiarId(roomId: string) {
@@ -130,8 +167,8 @@ function Dashboard() {
         {mensaje}
       </p>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <section className="relative flex min-h-[240px] flex-col justify-between overflow-hidden rounded-3xl bg-[#0A3C3E] p-8 text-white lg:col-span-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <section className="relative flex min-h-[240px] flex-col justify-between overflow-hidden rounded-3xl bg-[#0A3C3E] p-8 text-white xl:col-span-2">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-300">
               {fechaActual}
@@ -159,7 +196,7 @@ function Dashboard() {
             <button
               type="button"
               onClick={() =>
-                document.getElementById('room-code')?.focus()
+                campoCodigo.current?.focus()
               }
               className="flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-medium text-[#0A3C3E] transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#0A3C3E]"
             >
@@ -189,24 +226,43 @@ function Dashboard() {
                 </label>
 
                 <input
+                  ref={campoCodigo}
                   id="room-code"
                   name="roomCode"
                   type="text"
                   placeholder="Pega el ID de la sala"
                   autoComplete="off"
                   value={roomCode}
-                  onChange={(e) => setRoomCode(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus-visible:border-[#047857] focus-visible:ring-2 focus-visible:ring-[#047857]"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  readOnly={ingresando}
+                  aria-invalid={Boolean(errorIngreso) && !PATRON_CODIGO_SALA.test(roomCode.trim())}
+                  aria-describedby={errorIngreso ? 'room-code-help room-code-error' : 'room-code-help'}
+                  onChange={(e) => {
+                    setRoomCode(e.target.value)
+                    setErrorIngreso('')
+                  }}
+                  className="w-full rounded-xl border border-gray-500 px-4 py-2.5 text-sm focus:outline-none focus-visible:border-[#047857] focus-visible:ring-2 focus-visible:ring-[#047857]"
                 />
+                <p id="room-code-help" className="mt-1 text-xs text-gray-600">
+                  El código contiene 20 letras o números.
+                </p>
+                <p id="room-code-error" role="alert" className="text-sm font-medium text-red-800">
+                  {errorIngreso}
+                </p>
               </div>
 
               <button
                 type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#86EFAC] py-2.5 text-sm font-semibold text-[#0A3C3E] transition-colors hover:bg-[#6EE7B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#047857] focus-visible:ring-offset-2"
+                aria-disabled={ingresando}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#70DCCB] aria-disabled:cursor-wait py-2.5 text-sm font-semibold text-[#0A3C3E] transition-colors hover:bg-[#6EE7B7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#047857] focus-visible:ring-offset-2"
               >
                 Unirse a una sala
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </button>
+              <p role="status" className="text-sm text-[#073B43]">
+                {ingresando ? 'Ingresando a la sala...' : ''}
+              </p>
             </form>
           </div>
         </section>
@@ -295,7 +351,7 @@ function Dashboard() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
             {salasRecientes.map((sala) => (
               <article
                 key={sala.roomId}
