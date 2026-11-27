@@ -1,8 +1,9 @@
 
-import type { ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, Ref } from 'react'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger'
+  ref?: Ref<HTMLButtonElement>
 }
 
 function Button({

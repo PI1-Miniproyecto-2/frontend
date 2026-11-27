@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   BookOpen,
   Check,
@@ -9,17 +9,25 @@ import {
   RefreshCw,
   AlertCircle,
 } from 'lucide-react'
+import DeleteRoomModal from '../components/DeleteRoomModal'
 import EditRoomModal from '../components/EditRoomModal'
 import { useAuth } from '../context/AuthContext'
 import { auth } from '../services/Firebase'
 import {
   guardarNombreSala,
+  mensajesEliminacion,
   obtenerMisSalas,
   type Sala,
 } from '../services/RoomsService'
 
 function Rooms() {
   const { user } = useAuth()
+  const location = useLocation()
+  const retorno = location.state?.eliminacion
+  const encabezado = useRef<HTMLHeadingElement>(null)
+  const retiradas = useRef(new Set<string>())
+  const [eliminacion, setEliminacion] = useState<{ resultado: 'eliminada' | 'no-disponible' } | null>(() =>
+    retorno === 'eliminada' || retorno === 'no-disponible' ? { resultado: retorno } : null)
   const [salas, setSalas] = useState<Sala[]>([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
@@ -39,7 +47,7 @@ function Rooms() {
 
     try {
       const resultado = await obtenerMisSalas(solicitud.signal)
-      if (vigente()) setSalas(resultado)
+      if (vigente()) setSalas(resultado.filter(sala => !retiradas.current.has(sala.roomId)))
     } catch {
       if (vigente()) setError(
         'No pudimos cargar tus salas. Comprueba tu conexión e inténtalo nuevamente.'
@@ -53,6 +61,17 @@ function Rooms() {
     void cargarSalas()
     return () => consulta.current?.abort()
   }, [cargarSalas])
+
+  useEffect(() => {
+    if (eliminacion) encabezado.current?.focus()
+  }, [eliminacion])
+
+  function retirarSala(roomId: string, resultado: 'eliminada' | 'no-disponible') {
+    retiradas.current.add(roomId)
+    setSalas(actuales => actuales.filter(sala => sala.roomId !== roomId))
+    setConfirmacion('')
+    setEliminacion({ resultado })
+  }
 
   async function copiarId(roomId: string) {
     try {
@@ -69,7 +88,7 @@ function Rooms() {
     <section className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
       <header className="mb-7 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-[#073B43]">
+          <h1 ref={encabezado} tabIndex={-1} className="text-3xl font-bold text-[#073B43]">
             Mis salas de estudio
           </h1>
           <p className="mt-2 text-sm text-gray-600">
@@ -91,6 +110,10 @@ function Rooms() {
       </p>
 
       <p role="status" className="mb-4 font-semibold break-words text-[#047857] empty:sr-only">{confirmacion}</p>
+
+      <p role="status" className="mb-4 font-semibold text-[#073B43] empty:sr-only">
+        {eliminacion && mensajesEliminacion[eliminacion.resultado]}
+      </p>
 
       {cargando ? (
         <div
@@ -196,6 +219,7 @@ function Rooms() {
                       className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#DCE9E8] px-4 py-2.5 text-sm font-semibold text-[#073B43] hover:bg-[#F1F7F6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#087F77]"
                       onGuardar={async (nombre, signal) => {
                         setConfirmacion('')
+                        setEliminacion(null)
                         const { sala: actualizada, confirmado } = await guardarNombreSala(sala.roomId, nombre, signal)
                         if (!signal.aborted && auth.currentUser === user) {
                           setSalas(actuales => actuales.map(actual =>
@@ -204,6 +228,12 @@ function Rooms() {
                         return confirmado
                       }}
                       onGuardado={() => setConfirmacion('El nombre de la sala se actualizó correctamente.')} />
+                  )}
+
+                  {user && sala.ownerUid === user.uid && (
+                    <DeleteRoomModal sala={sala} user={user}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-300 px-4 py-2.5 text-sm font-semibold text-red-800 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-800"
+                      onResultado={resultado => retirarSala(sala.roomId, resultado)} />
                   )}
 
                   <button

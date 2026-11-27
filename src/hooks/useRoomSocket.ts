@@ -22,6 +22,7 @@ const sinConfiguracion = {
 const noConfirmado = 'No pudimos confirmar la entrega. Revisa el chat antes de volver a enviar.'
 
 type Acciones = {
+  invalidarSala: (mensaje: string) => void
   editarNombre: (nombre: string, signal: AbortSignal) => Promise<boolean>
   enviar: (content: string) => Promise<string | null>
   salir: () => Promise<void>
@@ -413,6 +414,9 @@ function iniciarSesionSala(roomId: string, user: User, url: string, {
   }
 
   const acciones: Acciones = {
+    invalidarSala(mensaje) {
+      if (vigente()) denegar(mensaje)
+    },
     async editarNombre(nombre, signal) {
       if (!vigente()) throw new ErrorSala('autenticacion')
       const revision = revisionNombre

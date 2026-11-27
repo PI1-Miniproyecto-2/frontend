@@ -53,12 +53,12 @@ export function mensajeErrorSala(error: unknown, accion: 'ingresar' | 'abrir') {
   return `No pudimos ${accion === 'ingresar' ? 'ingresar a' : 'abrir'} la sala. Inténtalo nuevamente.`
 }
 
-async function peticionSalas(
-  method: 'GET' | 'POST' | 'PATCH',
+async function respuestaSalas(
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   ruta = '',
   datos?: CrearSalaDatos,
   signal?: AbortSignal
-): Promise<unknown> {
+): Promise<Response> {
   const token = await obtenerToken().catch(() => {
     throw new ErrorSala('autenticacion')
   })
@@ -78,7 +78,16 @@ async function peticionSalas(
   })
 
   if (!response.ok) throw new ErrorSala('http', response.status)
+  return response
+}
 
+async function peticionSalas(
+  method: 'GET' | 'POST' | 'PATCH',
+  ruta = '',
+  datos?: CrearSalaDatos,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const response = await respuestaSalas(method, ruta, datos, signal)
   return response.json().catch(() => {
     throw new ErrorSala('respuesta')
   })
@@ -124,7 +133,7 @@ export async function editarSala(roomId: string, name: string, signal?: AbortSig
   return validarSala(await peticionSalas('PATCH', `/${encodeURIComponent(roomId)}`, { name: name.trim() }, signal), roomId)
 }
 
-function edicionIncierta(error: unknown) {
+function resultadoIncierto(error: unknown) {
   return error instanceof ErrorSala && (
     error.tipo === 'conexion' || error.tipo === 'respuesta' ||
     (error.status !== undefined && error.status >= 500)
@@ -137,11 +146,13 @@ async function conPlazo<T>(signal: AbortSignal, ms: number, ejecutar: (signal: A
   const cancelar = () => solicitud.abort()
   signal.addEventListener('abort', cancelar, { once: true })
   const plazo = setTimeout(cancelar, ms)
+  const vencimiento = new Promise<never>((_, rechazar) => {
+    solicitud.signal.addEventListener('abort', () => {
+      rechazar(signal.aborted ? signal.reason : new ErrorSala('conexion'))
+    }, { once: true })
+  })
   try {
-    return await ejecutar(solicitud.signal)
-  } catch (error) {
-    if (solicitud.signal.aborted && !signal.aborted) throw new ErrorSala('conexion')
-    throw error
+    return await Promise.race([ejecutar(solicitud.signal), vencimiento])
   } finally {
     clearTimeout(plazo)
     signal.removeEventListener('abort', cancelar)
@@ -158,7 +169,7 @@ export async function guardarNombreSala(roomId: string, name: string, signal: Ab
     return { sala, confirmado: true }
   } catch (error) {
     signal.throwIfAborted()
-    if (!edicionIncierta(error)) throw error
+    if (!resultadoIncierto(error)) throw error
 
     // Una respuesta perdida puede corresponder a una escritura exitosa.
     const sala = await consultarSalaConPlazo(roomId, signal)
@@ -171,7 +182,7 @@ export async function guardarNombreSala(roomId: string, name: string, signal: Ab
 }
 
 export function mensajeErrorEdicion(error: unknown) {
-  if (edicionIncierta(error)) {
+  if (resultadoIncierto(error)) {
     return 'No pudimos confirmar el cambio. Comprueba el nombre actual antes de volver a guardar.'
   }
   if (error instanceof ErrorSala) {
@@ -182,6 +193,53 @@ export function mensajeErrorEdicion(error: unknown) {
     if (error.status === 429) return 'Hay demasiadas solicitudes. Espera un momento antes de volver a guardar.'
   }
   return 'No pudimos guardar los cambios. Inténtalo nuevamente.'
+}
+
+export async function eliminarSala(roomId: string, signal?: AbortSignal): Promise<void> {
+  if (!PATRON_CODIGO_SALA.test(roomId)) throw new ErrorSala('http', 400)
+  const respuesta = await respuestaSalas('DELETE', `/${encodeURIComponent(roomId)}`, undefined, signal)
+  if (respuesta.status !== 204) throw new ErrorSala('respuesta')
+}
+
+export type ResultadoEliminacion = 'eliminada' | 'no-disponible' | 'incierta'
+export const mensajesEliminacion = {
+  eliminada: 'La sala se eliminó correctamente.',
+  'no-disponible': 'La sala ya no está disponible.',
+  incierta: 'No pudimos confirmar el resultado de la eliminación. Comprueba el estado de la sala antes de volver a intentarlo.',
+} satisfies Record<ResultadoEliminacion, string>
+
+export async function comprobarDisponibilidadSala(roomId: string, signal: AbortSignal) {
+  try {
+    await consultarSalaConPlazo(roomId, signal)
+    return 'disponible' as const
+  } catch (error) {
+    signal.throwIfAborted()
+    if (error instanceof ErrorSala && error.status === 404) return 'no-disponible' as const
+    return 'incierta' as const
+  }
+}
+
+export async function confirmarEliminacionSala(roomId: string, signal: AbortSignal): Promise<ResultadoEliminacion> {
+  try {
+    await conPlazo(signal, 12_000, peticion => eliminarSala(roomId, peticion))
+    return 'eliminada'
+  } catch (error) {
+    signal.throwIfAborted()
+    if (error instanceof ErrorSala && error.status === 404) return 'no-disponible'
+    if (!resultadoIncierto(error)) throw error
+    const disponibilidad = await comprobarDisponibilidadSala(roomId, signal)
+    return disponibilidad === 'no-disponible' ? disponibilidad : 'incierta'
+  }
+}
+
+export function mensajeErrorEliminacion(error: unknown) {
+  if (error instanceof ErrorSala) {
+    if (error.status === 400) return 'El identificador de la sala no es válido.'
+    if (error.status === 401 || error.tipo === 'autenticacion') return 'No pudimos verificar tu sesión. Vuelve a iniciar sesión.'
+    if (error.status === 403) return 'No tienes permiso para eliminar esta sala.'
+    if (error.status === 429) return 'Hay demasiadas solicitudes. Espera un momento antes de volver a intentarlo.'
+  }
+  return 'No pudimos completar la solicitud. Inténtalo nuevamente.'
 }
 
 export async function obtenerMisSalas(signal?: AbortSignal): Promise<Sala[]> {

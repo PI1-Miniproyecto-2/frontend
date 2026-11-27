@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useNavigationType, useParams } from 'react-router-dom'
 import { ArrowLeft, BookOpen, CameraOff, Copy, MessageCircle, MicOff, MonitorUp } from 'lucide-react'
 import type { User } from 'firebase/auth'
+import DeleteRoomModal from '../components/DeleteRoomModal'
 import EditRoomModal from '../components/EditRoomModal'
 import ParticipantsList from '../components/ParticipantsList'
 import RoomChat from '../components/RoomChat'
@@ -12,6 +13,7 @@ import {
   ErrorSala,
   guardarNombreSala,
   mensajeErrorSala,
+  mensajesEliminacion,
   obtenerSala,
   PATRON_CODIGO_SALA,
   type Sala,
@@ -148,13 +150,19 @@ function InteriorSala({ sala, user, confirmarIngreso }: {
   const encabezado = useRef<HTMLHeadingElement>(null)
   const salidaEnCurso = useRef(false)
   const montado = useRef(false)
+  const solicitudSala = useRef<AbortController | null>(null)
   const [errorAccesoRest, setErrorAccesoRest] = useState('')
   const denegado = sesion.conexion.estado === 'denied' || Boolean(errorAccesoRest)
   const rol = sala.ownerUid === user.uid ? 'Anfitrión' : 'Participante'
 
   useEffect(() => {
+    const solicitud = new AbortController()
+    solicitudSala.current = solicitud
     montado.current = true
-    return () => { montado.current = false }
+    return () => {
+      solicitud.abort()
+      montado.current = false
+    }
   }, [])
 
   useEffect(() => {
@@ -215,6 +223,18 @@ function InteriorSala({ sala, user, confirmarIngreso }: {
                 }
               }}
               onGuardado={() => setConfirmacionEdicion('El nombre de la sala se actualizó correctamente.')} />
+          )}
+          {sala.ownerUid === user.uid && sesion.conexion.estado !== 'leaving' && (
+            <DeleteRoomModal sala={{ ...sala, name: nombre }} user={user}
+              className={`inline-flex min-h-11 items-center gap-2 rounded-lg border border-red-300 px-3 py-2 font-semibold text-red-100 hover:bg-red-900/60 ${focoClaro}`}
+              signalSala={() => solicitudSala.current?.signal}
+              onResultado={resultado => {
+                if (!montado.current || auth.currentUser !== user) return
+                const mensaje = mensajesEliminacion[resultado]
+                sesion.acciones.current?.invalidarSala(mensaje)
+                setErrorAccesoRest(mensaje)
+                navegar('/rooms', { replace: true, state: { eliminacion: resultado } })
+              }} />
           )}
           <button
             type="button"

@@ -23,3 +23,11 @@ El anfitrión puede abrir **Editar sala** desde **Mis salas** o desde la cabecer
 Backend Realtime notifica a los participantes mediante `room:updated`. El cliente conserva la sesión de chat y consulta el nombre por REST tras reingresar después de una desconexión. Si una respuesta de edición es incierta o REST y Socket.IO discrepan, el cliente vuelve a consultar la sala. El contrato carece de una versión común para ordenar eventos y respuestas concurrentes.
 
 Pruebas automatizadas de edición: `node --test tests/room-edit.test.mjs`.
+
+### Eliminación de salas (US-07)
+
+El anfitrión puede confirmar **Eliminar sala** desde la tarjeta o desde la cabecera. El cliente envía `DELETE /api/v1/rooms/{roomId}` con autenticación y sin cuerpo. Un `204` confirma la eliminación del documento de sala. Los mensajes persistidos por separado se conservan en el backend y dejan de estar accesibles desde esa sala.
+
+`room:deleted` cierra el chat, la presencia y el historial de los usuarios conectados. Si la respuesta de DELETE es incierta, el cliente comprueba la disponibilidad con GET. Un `404` se presenta como sala no disponible. Cualquier nuevo intento de eliminación requiere una confirmación del anfitrión.
+
+Para ejecutar las pruebas del cliente de eliminación, usa `node --test tests/room-delete.test.mjs`.
